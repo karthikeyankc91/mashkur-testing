@@ -5,15 +5,15 @@ Update it in the same turn that an artifact is approved and persisted.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2
-LAST APPROVED: TRD §1.1-1.3, §1.5-1.8 -- Phase 2.2 complete
-NEXT STEP: Approve the TRD as a whole (Phase 2.3 review done, 4 passes,
-           R-1..R-6 applied). On approval -> merge phase/02-trd to main,
-           open phase/03-impl, begin Phase 3 step files.
+CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 01
+LAST APPROVED: TRD as a whole -- merged to main (32ed602)
+NEXT STEP: Review docs/03-implementation/00_INDEX.md (the 8-step
+           decomposition) and step_01_domain_and_ports.md. Steps are
+           written one at a time; 02-08 are titles only until reached.
 ==================================================
 ```
 
-**Branch:** `phase/02-trd` — merges to `main` on TRD approval
+**Branch:** `phase/03-impl` — merges to `main` as steps are approved
 **Project:** Glofox Memberships Purchase API take-home (Java 21 / Spring Boot 4.0.0)
 
 ## Approval log
@@ -33,7 +33,8 @@ NEXT STEP: Approve the TRD as a whole (Phase 2.3 review done, 4 passes,
 | 2026-10-30 | 2 | TRD §4 edge cases + §6 findings | **Approved** |
 | 2026-10-30 | 2 | TRD §5 test strategy | **Approved** |
 | 2026-10-30 | 2 | TRD §1.7 + §1.1-1.3 + §1.5, §1.6, §1.8 | **Approved** |
-| 2026-10-30 | 2 | TRD Phase 2.3 review, 4 passes, R-1..R-6 | Draft — awaiting review |
+| 2026-10-30 | 2 | TRD Phase 2.3 review, 4 passes, R-1..R-6 | **Approved** — merged `32ed602` |
+| 2026-10-30 | 3 | `00_INDEX.md` 8-step decomposition + `step_01` | Draft — awaiting review |
 
 ### Phase 2.3 review findings
 
