@@ -83,6 +83,20 @@ Seeded data: Monthly Unlimited (`1111…`, unlimited, active, 8000, –, –),
    prefers "clarity over frameworks for their own sake."
 7. **`remainingSlots == null` means unlimited inventory, not zero** — true for
    three of four plans.
+8. **Jackson 3 with a split package layout.** Verified from the resolved
+   `runtimeClasspath`: databind is `tools.jackson.core:jackson-databind:3.0.2`,
+   but annotations stayed at `com.fasterxml.jackson.core:jackson-annotations:2.20`
+   in the **old** `com.fasterxml.jackson.annotation` package. So `@JsonProperty`
+   / `@JsonValue` import from `com.fasterxml.*` while `ObjectMapper` /
+   `PropertyNamingStrategies` import from `tools.jackson.databind.*`. Guessing
+   either direction is a compile error.
+9. **No `jackson-datatype-jsr310` needed.** `jackson-databind` 3.0.2 carries
+   `java.time` support internally (60 JSR-310 classes in the jar), so
+   `LocalDate` and `Instant` serialise without an extra dependency or module
+   registration.
+10. **`spring.jackson.property-naming-strategy` exists in Boot 4** (confirmed in
+    `spring-boot-jackson-4.0.0.jar` configuration metadata, type `String`), so
+    global `SNAKE_CASE` is one line of YAML rather than per-field annotations.
 
 ## Repo defect found and fixed
 

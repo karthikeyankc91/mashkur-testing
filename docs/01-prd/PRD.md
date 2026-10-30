@@ -245,6 +245,7 @@ property carrying a stable machine-readable value.
 | `409` | plan is inactive | `plan_inactive` |
 | `409` | member already holds an active unlimited | `unlimited_membership_exists` |
 | `409` | finite inventory exhausted | `plan_sold_out` |
+| `409` | cancelling an already-cancelled purchase *(Tier 2)* | `purchase_already_cancelled` |
 | `402` | charge declined by a working gateway | `payment_declined` |
 | `502` | gateway unreachable or errored before deciding | `payment_gateway_error` |
 | `500` | anything unanticipated | `internal_error` |
@@ -278,7 +279,7 @@ unaffected, which is what keeps the concurrency tests time-independent.
 | Concern | In scope | Out of scope |
 |---|---|---|
 | Plans | Read seeded plans, including inactive | Create / update / delete |
-| Purchases | Create, fetch by id | List, filter, paginate (Tier 3 stretch) |
+| Purchases | Create, fetch by id | List, filter, paginate — a README stretch item taken into no tier |
 | Payment | Charge through the port; distinguish decline from outage | Refund, automatic retry, capture/auth split |
 | Inventory | Decrement on success; never oversell | Restock, waitlist, reservation expiry |
 | Membership lifecycle | `ACTIVE` on purchase | Expiry, renewal, freeze, upgrade; credit consumption |
@@ -292,6 +293,10 @@ With five promo slots and **at least 20 concurrent** purchase requests released
 from a common barrier: exactly 5 return `201`, the remainder return `409
 plan_sold_out`, and `remaining_slots` settles at exactly `0`. Never negative.
 Never `>0` while requests were rejected. Repeatable, not flaky.
+
+Twenty is the floor this requirement sets; T-1 uses **500** virtual threads,
+because more contenders on five slots materially widens the chance of hitting a
+narrow interleaving and Java 21 makes them cheap.
 
 ### NFR-2 — Atomicity without transactions
 In-memory storage provides no rollback, and the gateway cannot enlist in one.
@@ -368,6 +373,7 @@ reasons — this section is the source for `SUBMISSION.md`.
 | **D-7** | Plan reference on purchase | Snapshot | A purchase is a historical record; a price change must not rewrite history |
 | **D-8** | `start_date` lower bound | Reject strictly before today; no upper bound | Backdating a membership is a billing decision, not a purchase one. Cost: a clock enters validation (NFR-5), and the README's own stale example now fails (AC-11) |
 | **D-9** | Cancel and the unlimited slot | A cancelled unlimited frees the member immediately | The rule reads "active"; `CANCELLED` is not active. Any other reading needs a cooling-off concept nothing in the brief supports |
+| **D-10** | Double cancel | `409 purchase_already_cancelled`, not a silent idempotent `200` | A client cancelling twice has a bug; hiding it helps nobody. Added by TRD finding F-4, which also showed the status transition must be a CAS — two concurrent cancels would otherwise both restore a slot and leave a 5-slot pack with 6 *(Tier 2 only)* |
 
 ## 10. Scope Tiers
 
@@ -398,7 +404,7 @@ itself part of the submission.
 
 | # | Test | Risk it retires |
 |---|---|---|
-| **T-1** | Promo oversell: ≥20 threads on a `CountDownLatch` barrier, 5 slots | The headline requirement and an explicit evaluation criterion |
+| **T-1** | Promo oversell: 500 virtual threads released from one start gate onto 5 slots. Asserts **four** invariants — exactly 5 × `201`; all others `409 plan_sold_out`; final `remaining_slots == 0`; **gateway charged exactly 5 times** | The headline requirement and an explicit evaluation criterion. The charge count is not redundant: an implementation that charged all 500 cards and persisted only 5 satisfies the other three (TRD F-5) |
 | **T-2** | Payment failure: no purchase persisted **and** inventory unchanged | FR-5(f); the exception is unchecked, so the default failure mode is a leaked `500` over partial state |
 | **T-3** | Concurrent duplicate-unlimited, same member → exactly one `201` | NFR-3, the race the brief does not mention |
 | **T-4** | `remaining_slots: null` is unlimited — repeated purchases of `10-Class Pack` succeed | Highest-probability one-character bug: an inventory check written `remaining > 0` makes three of four plans unpurchasable |
@@ -409,9 +415,11 @@ itself part of the submission.
 | **T-9** | `start_date` of yesterday → `400 start_date_in_past`; today → `201` | AC-11, with a pinned clock. The today boundary is the off-by-one |
 | **T-10** | Gateway outage → `502 payment_gateway_error`, no purchase, inventory unchanged | AC-8b. Must assert the *same* cleanup as T-2, or the new branch silently skips it |
 | **T-11** | Cancel an unlimited, then repurchase → `201` *(Tier 2 only)* | D-9 |
+| **T-12** | Concurrent double-cancel of one promo purchase: one `200`, one `409 purchase_already_cancelled`, slot restored **exactly once** *(Tier 2 only)* | D-10 / TRD F-3 — the restore path has the same check-then-act race as the decrement, and only the counter's final value catches it |
 
 T-1 through T-4 are the submission's spine. T-5 through T-10 are cheap and fast.
-T-11 exists only if Tier 2 is reached.
+T-11 and T-12 exist only if Tier 2 is reached — and T-12 is the one that matters,
+since T-11 would pass even with the F-3 bug present.
 
 The pairing of T-2 and T-10 is deliberate: splitting one failure path into two
 is exactly when the cleanup guarantee on the second path gets forgotten.
