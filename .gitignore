@@ -1,0 +1,11 @@
+# OS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Agent tooling — local-only state, not shared protocol
+.claude/settings.local.json
+.planning/
