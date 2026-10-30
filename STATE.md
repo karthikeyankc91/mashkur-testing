@@ -5,12 +5,16 @@ Update it in the same turn that an artifact is approved and persisted.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 0 [Bootstrap] -> Sub-Phase 0.1
+CURRENT PHASE: Phase 1 [High-Level Scoping & PRD] -> Sub-Phase 1.1
 LAST APPROVED: Repository scaffold (AGENTS.md, CLAUDE.md, context/, docs/)
-NEXT STEP: Awaiting user-supplied codebase context, skeleton tasks, and
-           constraints in context/ — then begin Phase 1 PRD draft.
+NEXT STEP: BLOCKED on user input. context/ holds placeholders only — no target
+           codebase, tasks, or constraints have been supplied. Once filled,
+           produce the initial PRD draft into docs/01-prd/PRD.md plus 2-3
+           targeted scoping questions.
 ==================================================
 ```
+
+**Branch:** `phase/01-prd` (merges to `main` on PRD approval)
 
 ## Approval log
 
@@ -20,15 +24,24 @@ session reconstruct what was settled and what is still open.
 | Date | Phase | Artifact | Status |
 |---|---|---|---|
 | 2026-10-30 | 0 | Repo scaffold + agent operating contract | Approved |
+| 2026-10-30 | 1 | `docs/01-prd/PRD.md` | Empty template — not started |
 
 ## Open questions
 
 Questions asked but not yet answered. Carry these across sessions; clear them as
-they are resolved.
+they are resolved. Phase 1's 2–3 scoping questions land here once asked.
 
-- _(none — Phase 1 has not started)_
+- _(none yet — the scoping questions cannot be written until `context/` is filled;
+  asking them against an unknown stack would produce generic questions, which is
+  the failure mode this workflow exists to avoid)_
 
 ## Blockers
 
-- `context/codebase-context.md`, `context/tasks.md`, and `context/constraints.md`
-  are placeholders. Phase 1 cannot start until they are filled in.
+1. **`context/` is unfilled.** All three files are placeholders:
+   - `context/codebase-context.md` — tech stack, directory tree, existing patterns
+   - `context/tasks.md` — the interview brief, provided skeleton/stubs, deliverables
+   - `context/constraints.md` — format, time budget, hard vs. soft constraints
+
+   Phase 1 cannot legitimately start until these are filled. A PRD written against
+   an assumed stack produces user stories that do not survive contact with the real
+   repo, and every downstream phase inherits the error.
