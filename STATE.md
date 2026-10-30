@@ -5,14 +5,15 @@ Update it in the same turn that an artifact is approved and persisted.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 1 [High-Level Scoping & PRD] -> Sub-Phase 1.2
-LAST APPROVED: Plan approved (skeleton import + wrapper fix + PRD scope)
-NEXT STEP: Review docs/01-prd/PRD.md. On approval -> merge phase/01-prd to
-           main, then open phase/02-trd and begin Phase 2.1 (TRD skeleton).
+CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.1
+LAST APPROVED: docs/01-prd/PRD.md — merged to main (f54450b)
+NEXT STEP: Review docs/02-trd/TRD.md skeleton + proposed expansion order.
+           On approval -> Phase 2.2, expanding ONE section at a time,
+           starting with §1.4 (concurrency and atomicity).
 ==================================================
 ```
 
-**Branch:** `phase/01-prd` — merges to `main` on PRD approval
+**Branch:** `phase/02-trd` — merges to `main` on TRD approval
 **Project:** Glofox Memberships Purchase API take-home (Java 21 / Spring Boot 4.0.0)
 
 ## Approval log
@@ -23,7 +24,8 @@ NEXT STEP: Review docs/01-prd/PRD.md. On approval -> merge phase/01-prd to
 | 2026-10-30 | 0 | `55036b4` skeleton vendor import (unmodified) | Done |
 | 2026-10-30 | 0 | `9f52e7a` gradle wrapper path fix | Done, verified |
 | 2026-10-30 | 1 | `context/` filled from verified skeleton | Done |
-| 2026-10-30 | 1 | `docs/01-prd/PRD.md` | **Draft — awaiting review** |
+| 2026-10-30 | 1 | `docs/01-prd/PRD.md` | **Approved** — merged `f54450b` |
+| 2026-10-30 | 2 | `docs/02-trd/TRD.md` skeleton | Draft — awaiting review |
 
 ## Locked decisions
 
