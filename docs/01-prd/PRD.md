@@ -278,7 +278,7 @@ unaffected, which is what keeps the concurrency tests time-independent.
 | Concern | In scope | Out of scope |
 |---|---|---|
 | Plans | Read seeded plans, including inactive | Create / update / delete |
-| Purchases | Create, fetch by id | List, filter, paginate (Tier 3 stretch) |
+| Purchases | Create, fetch by id | List, filter, paginate — a README stretch item taken into no tier |
 | Payment | Charge through the port; distinguish decline from outage | Refund, automatic retry, capture/auth split |
 | Inventory | Decrement on success; never oversell | Restock, waitlist, reservation expiry |
 | Membership lifecycle | `ACTIVE` on purchase | Expiry, renewal, freeze, upgrade; credit consumption |

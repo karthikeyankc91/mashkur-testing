@@ -5,7 +5,8 @@
 > answers yet. Sections are expanded **one at a time** in Phase 2.2, each pausing
 > for approval.
 
-**Upstream:** [`docs/01-prd/PRD.md`](../01-prd/PRD.md) (approved, `f54450b`) ·
+**Upstream:** [`docs/01-prd/PRD.md`](../01-prd/PRD.md) (approved `f54450b`, amended
+`6e74e3a` — Q-1/Q-2/Q-3 resolved) ·
 [`context/codebase-context.md`](../../context/codebase-context.md) (verified skeleton)
 
 **Scope of this document:** how the PRD's requirements are built. The PRD fixed
@@ -41,7 +42,20 @@ controller or the store, and what the handler is left holding.
 Hand-roll, or add `spring-boot-starter-validation` to a deliberately three-dependency
 build? Weighed against "clarity over frameworks for their own sake."
 
-### 1.6 Startup seeding and bean wiring
+### 1.6 The clock boundary (Q-1)
+AC-11 needs "today"; NFR-5 forbids business rules from reading a clock. How the
+`Clock` is injected and reachable from validation **only**, enforced structurally
+rather than by convention — so the domain cannot acquire a time dependency by
+accident and leave T-1/T-3 time-sensitive.
+
+### 1.7 Payment port extension (Q-3)
+AC-8a/8b require distinguishing a decline from an outage, which the port as
+shipped cannot express. Subtype of `PaymentFailedException`, a sibling exception,
+or a result type? Constraint: `AlwaysSucceedingPaymentGateway` must keep
+compiling untouched, and the change must read as a deliberate extension of
+vendor code rather than an edit to it.
+
+### 1.8 Startup seeding and bean wiring
 How FR-1's "before traffic is served" is guaranteed, and where the
 `PlanSeed → domain` mapping lives.
 
@@ -95,9 +109,10 @@ D-3 concretely: the `ProblemDetail` fields used, how the `code` extension is
 attached, and the `type` URI convention.
 
 ### 3.6 Exception-to-status mapping
-How PRD AC-10's table is implemented — which exceptions exist, where they are
-translated, and how an unchecked `PaymentFailedException` is prevented from
-escaping as a `500`.
+How PRD AC-10's ten-row table is implemented — which exceptions exist, where they
+are translated, and how an unchecked `PaymentFailedException` is prevented from
+escaping as a `500`. Includes the `402`/`502` split from §1.7 and the distinct
+`start_date_in_past` code.
 
 ---
 
@@ -128,6 +143,15 @@ slot (PRD Q-2).
 Why the port's missing idempotency parameter pushes dedupe into the service, and
 how that second race interacts with §1.4.
 
+### 4.8 The `start_date` today boundary (Q-1)
+Yesterday rejected, today accepted — the off-by-one, and what "today" means when
+the request crosses midnight mid-flight (PRD AS-8).
+
+### 4.9 Cleanup parity across both payment failure modes (Q-3)
+Splitting one failure path into two is exactly when the second path silently
+loses the no-purchase/no-inventory-change guarantee. How both branches are made
+to share one cleanup path rather than two that must be kept in step.
+
 ---
 
 ## 5. Test Strategy
@@ -144,10 +168,14 @@ why `@MockBean` is unavailable.
 Barrier design, thread count, and the assertions that make NFR-1 non-flaky —
 including asserting the *final* inventory value, not just the success count.
 
-### 5.4 Coverage map
-PRD T-1…T-8 → test classes and method names.
+### 5.4 Clock control in tests
+How T-9 pins a fixed clock for the past-date boundary while T-1 and T-3 need no
+clock control at all — the observable payoff of §1.6.
 
-### 5.5 Deliberately untested
+### 5.5 Coverage map
+PRD T-1…T-11 → test classes and method names.
+
+### 5.6 Deliberately untested
 What is left uncovered inside the timebox, and why that is the right trade — this
 answers evaluation criterion #4 directly.
 
@@ -170,7 +198,7 @@ Expanding top-to-bottom would mean rewriting §1.1–1.3 once §1.4 settles.
 |---|---|---|
 | 1 | **§1.4** Concurrency and atomicity | Everything downstream depends on it. Also the hardest interview question |
 | 2 | **§2** Data models | Falls out of §1.4 once the atomic unit is known |
-| 3 | **§1.1–1.3, §1.5–1.6** Remaining architecture | Layout follows the types, not the reverse |
+| 3 | **§1.1–1.3, §1.5–1.8** Remaining architecture | Layout follows the types, not the reverse. §1.7 (port extension) is independent and can move earlier if you want it settled sooner |
 | 4 | **§3** API contracts | Mechanical once the domain exists |
 | 5 | **§4** Edge cases | An audit of 1–4; finds gaps while they are still cheap |
 | 6 | **§5** Test strategy | Needs the final shape to map tests onto |
