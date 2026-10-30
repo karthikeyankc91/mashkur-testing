@@ -1,3 +1,13 @@
+# Java / Gradle build output
+build/
+.gradle/
+bin/
+out/
+*.class
+
+# The wrapper jar is intentionally tracked — gradlew cannot bootstrap without it.
+!gradle/wrapper/gradle-wrapper.jar
+
 # OS
 .DS_Store
 
