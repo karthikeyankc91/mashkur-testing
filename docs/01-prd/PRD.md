@@ -1,6 +1,7 @@
 # PRD — Glofox Memberships Purchase API
 
-> **STATUS: DRAFT — awaiting approval.**
+> **STATUS: APPROVED** (merged `f54450b`) · **AMENDED 2026-10-30** — §13's three
+> open questions resolved; see §13 for every section the answers touched.
 > Phase 1 artifact. Scoped to functional boundaries, user stories, acceptance
 > criteria, and non-functional requirements. Package layout, class design, and
 > data models are deliberately absent — those are Phase 2 (TRD).
@@ -99,11 +100,16 @@ Priority order. Every story maps to acceptance criteria in §6.
   membership, so that I am not double-selling the same entitlement. → AC-6
 - **US-6** As a studio owner, I want the promo pack to stop selling at exactly
   five, so that I honour the offer I advertised. → AC-7
-- **US-7** As a member, I want a declined card to leave no trace, so that I am
+- **US-7** As a member, I want a failed charge to leave no trace, so that I am
   not charged for a membership I do not have and the slot returns to the pool.
   → AC-8
 - **US-8** As an API client, I want failures to carry a stable machine-readable
   code, so that I can show the right message rather than parse prose. → AC-10
+- **US-9** As an API client, I want a declined card and an unreachable gateway to
+  be distinguishable, so that I prompt for a new card in one case and retry in
+  the other. → AC-8a, AC-8b
+- **US-10** As a studio owner, I want memberships not to start in the past, so
+  that I am not asked to honour a period that has already elapsed. → AC-11
 
 ## 6. Functional Requirements & Acceptance Criteria
 
@@ -139,7 +145,8 @@ checks run first:
 
 1. **Shape** — body parses; `member_name` present; `plan_id` is a UUID;
    `start_date` is an ISO-8601 calendar date.
-2. **Semantics** — `member_name` non-blank after trimming.
+2. **Semantics** — `member_name` non-blank after trimming; `start_date` is not
+   before today (Q-1). → AC-11
 3. **Resolution** — plan exists.
 4. **Plan state** — plan is active.
 5. **Member state** — no existing active unlimited membership (unlimited plans).
@@ -178,6 +185,10 @@ hold packs alongside one unlimited. Member identity is the trimmed,
 case-folded `member_name` (D-4), so `"alice"`, `"Alice"` and `" Alice "` are one
 member.
 
+A `CANCELLED` unlimited membership does **not** block a new purchase (Q-2): the
+rule reads "active", and cancelled is not active. Only relevant if Tier 2 is
+reached. → T-11
+
 ### AC-7 — Promo inventory honoured
 Launch Promo Pack sells exactly five times. The sixth attempt returns `409` with
 code `plan_sold_out`. `remaining_slots` in `GET /v1/plans` decreases by exactly
@@ -185,10 +196,27 @@ one per success and never drops below zero. Plans with `remaining_slots: null`
 are purchasable without limit.
 
 ### AC-8 — Payment failure leaves nothing behind
-When the gateway throws `PaymentGateway.PaymentFailedException`, the response is
-`402` with code `payment_declined`, **and**: no purchase is retrievable by any
-id, and `remaining_slots` for the targeted plan is unchanged from its
-pre-request value.
+Whenever a charge does not succeed — for **either** failure mode below — no
+purchase is retrievable by any id, and `remaining_slots` for the targeted plan is
+unchanged from its pre-request value.
+
+- **AC-8a — Declined.** The card was refused: a definitive answer from a working
+  gateway. Responds `402` / `payment_declined`. Not retryable as-is.
+- **AC-8b — Gateway unavailable.** The gateway could not be reached or errored
+  before deciding: no answer at all. Responds `502` / `payment_gateway_error`.
+  Retryable. (Q-3)
+
+The distinction is the client's: a decline needs a different card, an outage
+needs the same request again later. Collapsing both into `402` tells the client
+to do the wrong thing half the time.
+
+**This requires extending the port.** As shipped, `PaymentFailedException(String)`
+is the only failure channel, so the two modes are indistinguishable — PRD AS-6
+previously recorded that as a hard limit. The README lists "distinguish payment
+decline vs gateway outage" as a stretch goal, which sanctions the change. The
+PRD requires the distinction; the TRD chooses the mechanism (exception subtype
+versus a new port exception) and must keep
+`AlwaysSucceedingPaymentGateway` compiling untouched.
 
 ### FR-6 / AC-9 — Purchase payload
 `id`, `member_name` (as submitted, preserving the member's own casing for
@@ -211,18 +239,39 @@ property carrying a stable machine-readable value.
 | Status | Condition | `code` |
 |---|---|---|
 | `400` | malformed JSON, non-UUID id, unparseable date, blank `member_name` | `validation_failed` |
+| `400` | `start_date` before today | `start_date_in_past` |
 | `404` | unknown `plan_id` | `plan_not_found` |
 | `404` | unknown purchase id | `purchase_not_found` |
 | `409` | plan is inactive | `plan_inactive` |
 | `409` | member already holds an active unlimited | `unlimited_membership_exists` |
 | `409` | finite inventory exhausted | `plan_sold_out` |
-| `402` | charge declined | `payment_declined` |
+| `402` | charge declined by a working gateway | `payment_declined` |
+| `502` | gateway unreachable or errored before deciding | `payment_gateway_error` |
 | `500` | anything unanticipated | `internal_error` |
+
+`start_date_in_past` gets its own code rather than sharing `validation_failed`,
+because a client can act on it (offer the user today's date) where a malformed
+body is a programming error.
 
 All three business-rule violations share `409`: the request is well-formed and
 references real resources, but conflicts with current state. They are
 distinguished by `code`, not by status — so a client switches on one stable
 field rather than on an HTTP number that may be reused.
+
+### AC-11 — `start_date` in the past is rejected
+A `start_date` strictly before today returns `400` with code
+`start_date_in_past`. Today and any future date are accepted; no upper bound is
+imposed. No charge is attempted and no purchase is created. (Q-1)
+
+**"Today" is read from an injectable clock, and only here.** Validation may read
+the clock; business rules may not (NFR-5). D-2's status-only active rule is
+unaffected, which is what keeps the concurrency tests time-independent.
+
+> ⚠️ **The README's own example payload uses `start_date: "2026-09-01"`, which is
+> now in the past.** Under this rule the brief's documented sample request
+> returns `400`. This is called out in `SUBMISSION.md` rather than worked around,
+> since silently accepting past dates to keep one stale example working is the
+> worse trade.
 
 ## 7. Functional Boundaries
 
@@ -230,7 +279,7 @@ field rather than on an HTTP number that may be reused.
 |---|---|---|
 | Plans | Read seeded plans, including inactive | Create / update / delete |
 | Purchases | Create, fetch by id | List, filter, paginate (Tier 3 stretch) |
-| Payment | Charge through the port; handle decline | Refund, retry, capture/auth split, outage-vs-decline |
+| Payment | Charge through the port; distinguish decline from outage | Refund, automatic retry, capture/auth split |
 | Inventory | Decrement on success; never oversell | Restock, waitlist, reservation expiry |
 | Membership lifecycle | `ACTIVE` on purchase | Expiry, renewal, freeze, upgrade; credit consumption |
 | Identity | `member_name` as key | Registration, dedupe, PII handling |
@@ -276,8 +325,11 @@ is a drop-in.
 - The gateway is replaceable per test to simulate failure. **Spring Boot 4
   removed `@MockBean`** — use `@MockitoBean`, or a `@TestConfiguration`
   contributing a `@Primary` failing implementation.
-- No core rule reads a wall clock. This follows from D-2 (status-only active
-  rule) and is what keeps the concurrency tests deterministic rather than
+- **No business rule reads a wall clock.** The clock is injectable and reachable
+  from *validation only* (AC-11's past-date check). D-2's status-only active rule
+  stays clock-free, which is what keeps T-1 and T-3 time-independent. Validation
+  tests pin a fixed clock; concurrency tests need no clock control at all.
+  Collapsing this boundary is how a clock-free domain silently becomes
   time-sensitive.
 - Concurrency tests use an explicit barrier, not `Thread.sleep`.
 
@@ -312,8 +364,10 @@ reasons — this section is the source for `SUBMISSION.md`.
 | **D-3** | Error shape | RFC 9457 `ProblemDetail` + `code` | Spring Boot 4 ships it and wires it through `@ExceptionHandler`; standards-based with near-zero custom code. The `code` extension restores the machine-readable value `ProblemDetail` alone lacks |
 | **D-4** | Member identity | Trim + case-fold the match key; store as submitted | Without it, `"alice"` bypasses the one-unlimited rule that `"Alice"` is subject to — a hole a reviewer will test immediately. Display value preserved because the member typed it |
 | **D-5** | Name uniqueness beyond unlimited | None | A member may hold many packs, and packs alongside one unlimited. Only FR-5(d) constrains |
-| **D-6** | Payment failure status | `402` + `payment_declined` | Widely used by payment APIs for a declined charge. *Alternative considered:* `409`, or `502` for gateway outage vs `402` for decline — rejected because the port cannot distinguish the two (Tier 3 stretch) |
+| **D-6** | Payment failure status | **Split:** `402` `payment_declined` for a decline, `502` `payment_gateway_error` for an outage | The two mean opposite things to a client: try another card versus retry this one. Requires extending the port, which the README sanctions as a stretch goal. *Alternative considered:* `503` + `Retry-After` for the outage — defensible, and arguably better, but `502` reads more plainly as "the upstream failed" |
 | **D-7** | Plan reference on purchase | Snapshot | A purchase is a historical record; a price change must not rewrite history |
+| **D-8** | `start_date` lower bound | Reject strictly before today; no upper bound | Backdating a membership is a billing decision, not a purchase one. Cost: a clock enters validation (NFR-5), and the README's own stale example now fails (AC-11) |
+| **D-9** | Cancel and the unlimited slot | A cancelled unlimited frees the member immediately | The rule reads "active"; `CANCELLED` is not active. Any other reading needs a cooling-off concept nothing in the brief supports |
 
 ## 10. Scope Tiers
 
@@ -322,15 +376,20 @@ says core completeness beats volume.
 
 | Tier | Content | Gate |
 |---|---|---|
-| **0 — MUST** | Three endpoints, seeding, FR-5(a–f), NFR-1/2/3, high-risk tests, `SUBMISSION.md` | Green by ~2.5h |
-| **1 — SHOULD** | Machine-readable error `code` values | Free: rides on D-3 |
-| **2 — COULD** | `POST /{id}/cancel`, soft cancel, promo inventory restore | Tier 0 green |
+| **0 — MUST** | Three endpoints, seeding, FR-5(a–f), AC-11 past-date rejection, NFR-1/2/3, high-risk tests, `SUBMISSION.md` | Green by ~2.5h |
+| **1 — SHOULD** | Machine-readable error `code` values; decline-vs-outage split (D-6) | Both committed. Codes ride on D-3; the split is one exception type and one handler branch |
+| **2 — COULD** | `POST /{id}/cancel`, soft cancel, promo inventory restore, D-9 slot release | Tier 0 green |
 | **3 — COULD** | `Idempotency-Key` on purchase | Tier 2 green **and** ≥1h left |
 
-Tier 3 is deliberately last: `PaymentGateway.charge(int, String)` takes no
-idempotency parameter, so deduplication lives entirely in the service and
-introduces a *second* race that interacts with the inventory race. Highest cost,
-highest risk to Tier 0.
+**Q-3 moved the decline/outage split out of Tier 3.** It was parked there while
+the port was assumed immutable; once extending the port is on the table it costs
+one exception type and one `@ExceptionHandler` branch, so it joins the committed
+scope. `AlwaysSucceedingPaymentGateway` must keep compiling untouched.
+
+Tier 3 remains last: `PaymentGateway.charge(int, String)` takes no idempotency
+parameter, so deduplication lives entirely in the service and introduces a
+*second* race that interacts with the inventory race. Highest cost, highest risk
+to Tier 0.
 
 ## 11. Test Strategy
 
@@ -347,8 +406,15 @@ itself part of the submission.
 | **T-6** | Purchase round-trip; unknown UUID → `404` | FR-4 |
 | **T-7** | Validation matrix: blank name, whitespace-only name, bad UUID, malformed date | FR-3 step 1–2 |
 | **T-8** | `GET /v1/plans` returns 4 including the inactive plan | FR-2; easy to filter inactive out by reflex |
+| **T-9** | `start_date` of yesterday → `400 start_date_in_past`; today → `201` | AC-11, with a pinned clock. The today boundary is the off-by-one |
+| **T-10** | Gateway outage → `502 payment_gateway_error`, no purchase, inventory unchanged | AC-8b. Must assert the *same* cleanup as T-2, or the new branch silently skips it |
+| **T-11** | Cancel an unlimited, then repurchase → `201` *(Tier 2 only)* | D-9 |
 
-T-1 through T-4 are the submission's spine. T-5 through T-8 are cheap and fast.
+T-1 through T-4 are the submission's spine. T-5 through T-10 are cheap and fast.
+T-11 exists only if Tier 2 is reached.
+
+The pairing of T-2 and T-10 is deliberate: splitting one failure path into two
+is exactly when the cleanup guarantee on the second path gets forgotten.
 
 ## 12. Assumptions
 
@@ -364,31 +430,50 @@ an unflagged assumption becomes an undefended decision in the follow-up.
 - **AS-4** Concurrency is in-process only. A second instance would oversell —
   correctness here depends on single-process ownership of the store, which is
   exactly what moving to a database would fix.
-- **AS-5** `start_date` is accepted as given, including dates in the past or far
-  future. No business rule constrains it; validating it would be inventing a
-  requirement.
-- **AS-6** The gateway is idempotency-unaware and cannot distinguish a decline
-  from an outage, because the port exposes neither.
+- **AS-5** `start_date` may be today or any future date, with **no upper bound** —
+  a membership starting in 2099 is accepted. Only the past is rejected (D-8).
+  Capping the future would be inventing a requirement.
+- **AS-6** The gateway is idempotency-unaware; the port exposes no key, so a
+  retry double-charges. *(Revised by Q-3: the port no longer hides the
+  decline/outage distinction — it is extended to expose it. Idempotency remains
+  unexposed.)*
 - **AS-7** `GET /v1/plans` returning inactive plans is intentional per the README;
   clients filter for display.
+- **AS-8** "Today", for AC-11, is the server's default timezone. The README puts
+  timezones out of scope, so D-8 creates a timezone question the brief declared
+  out of bounds — a member near midnight in another zone may see a date rejected
+  that is still today for them. Accepted for a single-studio exercise; a real
+  system would resolve "today" in the studio's zone.
+- **AS-9** Extending `PaymentGateway` is treated as permitted, on the strength of
+  the README listing decline-vs-outage as a stretch goal. The default bean is
+  left untouched.
 
-## 13. Open Questions
+## 13. Resolved Questions
 
-- **Q-1** Should `start_date` in the past be rejected? Currently accepted (AS-5).
-  Needs a product answer; no rule in the brief.
-- **Q-2** Should a cancelled unlimited membership immediately free the member to
-  buy another? Only matters if Tier 2 is reached. Proposed: yes — the rule reads
-  "active", and `CANCELLED` is not active.
-- **Q-3** Is `402` the right status for a decline, or should decline and gateway
-  outage be split (`402` vs `502`)? Blocked on Tier 3; the port cannot
-  distinguish them today.
+All three answered 2026-10-30. None outstanding.
+
+| # | Question | Answer | Landed in |
+|---|---|---|---|
+| **Q-1** | Reject `start_date` in the past? | **Yes** — strictly before today, no upper bound | D-8, AC-11, FR-3 step 2, T-9, AS-5, AS-8 |
+| **Q-2** | Does cancelling an unlimited free the member immediately? | **Yes** — `CANCELLED` is not active | D-9, AC-6, T-11, Tier 2 |
+| **Q-3** | Split decline from gateway outage? | **Yes** — `402` vs `502` | D-6, AC-8a/8b, FR-7 table, T-10, AS-6, AS-9, Tier 1 |
+
+Two consequences worth carrying into the TRD, because each reverses something
+the first draft asserted:
+
+1. **A clock re-enters the system** (Q-1). Confined to validation by NFR-5. The
+   TRD must make that confinement structural rather than a convention, or the
+   concurrency tests become time-sensitive.
+2. **The payment port is no longer immutable** (Q-3). AS-6 and D-6 originally
+   recorded the decline/outage distinction as impossible. The TRD chooses the
+   mechanism and must keep `AlwaysSucceedingPaymentGateway` compiling untouched.
 
 ---
 
 ```
 ==================================================
-CURRENT PHASE: Phase 1 [High-Level Scoping & PRD] -> Sub-Phase 1.2
-LAST APPROVED: Plan approved; skeleton imported; wrapper fixed
-NEXT STEP: Review this PRD. On approval -> merge phase/01-prd, open phase/02-trd
+CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.1
+LAST APPROVED: This PRD, as amended by the Q-1/Q-2/Q-3 answers
+NEXT STEP: TRD skeleton review, then Phase 2.2 expanding §1.4 first
 ==================================================
 ```
