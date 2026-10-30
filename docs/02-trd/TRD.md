@@ -1,9 +1,11 @@
 # TRD — Glofox Memberships Purchase API
 
-> **STATUS: Phase 2.2 in progress.** Skeleton approved. §1.4 approved.
-> **§2 expanded — awaiting review.** All other sections remain headings plus the
-> question they must answer. Sections are expanded **one at a time**, each
-> pausing for approval.
+> **STATUS: Phase 2.2 in progress.** Skeleton approved. §1.4, §2 approved.
+> **§3 expanded — awaiting review.** Still unexpanded: §1.1–1.3, §1.5–1.8, §4,
+> §5, §6. Sections are expanded **one at a time**, each pausing for approval.
+>
+> Expansion is running out of the §2.1 proposed order at the author's direction:
+> §3 was pulled ahead of the remaining architecture sub-sections.
 
 **Upstream:** [`docs/01-prd/PRD.md`](../01-prd/PRD.md) (approved `f54450b`, amended
 `6e74e3a` — Q-1/Q-2/Q-3 resolved) ·
@@ -456,28 +458,273 @@ argument as NFR-4 applied to input rather than storage.
 
 ## 3. API Contracts
 
+> **Classpath facts verified from the resolved `runtimeClasspath`, not assumed.**
+> Spring Boot 4.0.0 ships **Jackson 3.0.2** (`tools.jackson.core:jackson-databind`)
+> while annotations remain at `com.fasterxml.jackson.core:jackson-annotations:2.20`
+> in the **old** package. The split is counterintuitive and costs a confusing
+> compile error in both directions:
+>
+> | Import from | Examples |
+> |---|---|
+> | `com.fasterxml.jackson.annotation.*` | `@JsonProperty`, `@JsonValue`, `@JsonInclude` |
+> | `tools.jackson.databind.*` | `ObjectMapper`, `PropertyNamingStrategies`, modules |
+>
+> Also verified: `jackson-databind` 3.0.2 carries `java.time` support internally
+> (60 JSR-310 classes), so **no `jackson-datatype-jsr310` dependency is needed**
+> for `LocalDate` / `Instant`; and `spring.jackson.property-naming-strategy`
+> exists in Boot 4's configuration metadata, so §3.1's approach is available.
+
 ### 3.1 DTOs and the `snake_case` mapping
-Request/response types, and how D-1 is applied — per-field annotation versus a
-global naming strategy.
+
+**One line of configuration, not per-field annotations:**
+
+```yaml
+spring:
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+```
+
+D-1's reason was "consistency matters more than the choice", and a global
+strategy is the only option that *cannot* be applied inconsistently. Per-field
+`@JsonProperty` is 20-odd annotations with 20 chances to forget one, and the
+failure is silent — a single `camelCase` field in an otherwise `snake_case`
+payload. Per-class `@JsonNaming` has the same flaw at class granularity.
+
+**Cost, acknowledged:** the wire contract becomes invisible at the DTO. A reader
+of `PurchaseRequest` sees `memberName` and must know the global strategy to infer
+`member_name`. Mitigated by a one-line comment on each DTO and a note in
+`SUBMISSION.md`; the alternative trades that for a real correctness risk.
+
+**DTOs are separate types from the domain, in the web package.** No Jackson
+annotation ever appears on `Plan`, `Purchase`, or `MemberKey`. This is NFR-4
+applied at the inbound edge: the domain has no idea it is being serialised, so
+the wire format can change without touching it. An assembler maps
+domain → DTO.
+
+**Enum wire forms are lowercase, and mapped in the assembler.** The brief's
+vocabulary is `"unlimited"` / `"pack"`, but Jackson's default for an enum is
+`UNLIMITED`. Rather than annotate the domain enum with `@JsonValue` — which
+would put a web concern in the domain — the DTO carries a `String` and the
+assembler writes `type.name().toLowerCase(Locale.ROOT)`. `PurchaseStatus`
+follows the same rule (`"active"`, `"cancelled"`) so the whole API has one
+convention for enums rather than two.
+
+**Two kinds of time, deliberately different types:**
+
+| Field | Type | Why |
+|---|---|---|
+| `start_date` | `LocalDate` | A calendar date. FR-5(b): no timezone, no instant |
+| `created_at` | `Instant` | A real moment in time; serialises as ISO-8601 with `Z` |
+
+Collapsing them to one type is how "timezones are out of scope" becomes
+"timezones are a bug".
 
 ### 3.2 `GET /v1/plans`
-Exact response payload, field by field, with the null cases from PRD AC-2.
+
+`200 OK`, a bare JSON array in seed order, including the inactive plan.
+
+```json
+[
+  { "id": "11111111-1111-1111-1111-111111111111", "name": "Monthly Unlimited",
+    "type": "unlimited", "active": true,  "price_cents": 8000,
+    "credits": null, "remaining_slots": null },
+  { "id": "22222222-2222-2222-2222-222222222222", "name": "10-Class Pack",
+    "type": "pack",      "active": true,  "price_cents": 5000,
+    "credits": 10,   "remaining_slots": null },
+  { "id": "33333333-3333-3333-3333-333333333333", "name": "Launch Promo Pack",
+    "type": "pack",      "active": true,  "price_cents": 2500,
+    "credits": 5,    "remaining_slots": 5 },
+  { "id": "44444444-4444-4444-4444-444444444444", "name": "Legacy Plan",
+    "type": "unlimited", "active": false, "price_cents": 6000,
+    "credits": null, "remaining_slots": null }
+]
+```
+
+**A bare array, not `{"plans": [...]}`.** An envelope earns its place when it
+carries metadata; there is no pagination on plans and no plan count worth
+sending. The stretch `GET /purchases` *does* need `has_more`, and will have an
+envelope — the two differ because their requirements differ, not from
+inconsistency, and that is the defence if challenged.
+
+**`remaining_slots` is composed here, not stored.** §2.2 put inventory in a
+separate structure, so the assembler reads `inventory.remaining(plan.id())` and
+maps `OptionalInt.empty() → null`. This is the single place in the system where
+"unlimited inventory" becomes a JSON null, which is exactly where it belongs:
+at the edge, in the wire format, not in the domain.
+
+**`credits` and `remaining_slots` are both `5` for Launch Promo Pack** and come
+from two different structures. §2.6 explains why that coincidence is harmless.
 
 ### 3.3 `POST /v1/memberships/purchases`
-Exact request and `201` response, mapped to PRD FR-6.
+
+**Request:**
+
+```json
+{ "member_name": "Alice",
+  "plan_id": "11111111-1111-1111-1111-111111111111",
+  "start_date": "2026-11-01" }
+```
+
+**`201 Created`**, with a `Location` header:
+
+```
+Location: /v1/memberships/purchases/{id}
+```
+
+```json
+{
+  "id": "9f1c...",
+  "member_name": "Alice",
+  "plan": {
+    "plan_id": "11111111-1111-1111-1111-111111111111",
+    "name": "Monthly Unlimited",
+    "type": "unlimited",
+    "price_cents": 8000,
+    "credits": null
+  },
+  "amount_cents": 8000,
+  "status": "active",
+  "start_date": "2026-11-01",
+  "transaction_id": "txn-6b2e...",
+  "created_at": "2026-10-30T14:05:11Z"
+}
+```
+
+**`plan` is nested, not flattened.** PRD D-7 made this a *snapshot* — a
+historical record of what was sold. Nesting makes that visible: these five fields
+travel together and describe the plan as it was at purchase time, which a flat
+`plan_name` / `plan_price_cents` sprawl obscures.
+
+**`amount_cents` is repeated outside the snapshot** even though it equals
+`plan.price_cents` today. They are different facts: one is what the plan cost,
+the other is what this member was charged. A discount, proration, or tax would
+separate them, and FR-6 asks for "the amount charged" as a first-class field.
+
+**`Location` on a `201`** because the resource is addressable and we have just
+been told its id — PRD FR-4 exists precisely so that URL resolves. Cheap, correct
+HTTP, and a reasonable thing to be asked about.
+
+**`member_name` echoes what was submitted**, not the normalised key (§2.4). The
+`MemberKey` never appears on the wire; it is an internal matching concern.
 
 ### 3.4 `GET /v1/memberships/purchases/{id}`
-Response and the `400`-vs-`404` boundary for a malformed id.
+
+`200 OK` with the identical payload shape as §3.3 — one assembler, one DTO, so
+the two endpoints cannot drift.
+
+The `400`-vs-`404` boundary, which is a real distinction and worth defending:
+
+| Request | Status | `code` | Reasoning |
+|---|---|---|---|
+| `/purchases/not-a-uuid` | `400` | `validation_failed` | The id is not a well-formed identifier. The client sent something that could never name a purchase |
+| `/purchases/{valid-but-unknown-uuid}` | `404` | `purchase_not_found` | A well-formed id that names nothing. The client asked a sensible question with a negative answer |
+
+Mechanically, `@PathVariable UUID id` makes Spring throw
+`MethodArgumentTypeMismatchException` before the controller body runs. Spring's
+default renders a bare `400`, which loses the `code`, so §3.6's advice handles
+that exception explicitly.
 
 ### 3.5 Problem Details shape
-D-3 concretely: the `ProblemDetail` fields used, how the `code` extension is
-attached, and the `type` URI convention.
+
+`Content-Type: application/problem+json`, per D-3.
+
+```json
+{
+  "type": "urn:glofox:problem:plan-sold-out",
+  "title": "Plan sold out",
+  "status": 409,
+  "detail": "Launch Promo Pack has no remaining slots.",
+  "instance": "/v1/memberships/purchases",
+  "code": "plan_sold_out"
+}
+```
+
+Spring's `ProblemDetail` provides `type`, `title`, `status`, `detail`,
+`instance`; `code` is attached via `setProperty("code", ...)`, which the
+serialiser flattens to a top-level member as RFC 9457 extensions require.
+
+**`type` is a URN, not an `https://` URL.** The RFC says `type` SHOULD
+dereference to documentation. Inventing `https://glofox.example/problems/...`
+promises a page that does not exist, and `about:blank` discards the identity
+entirely. A URN is a valid URI that makes no dereferenceability promise and
+stays stable.
+
+**On the redundancy between `type` and `code` — stated rather than hidden.** A
+purist would use only `type`, and they would have a point. `code` exists because
+a short stable token is what clients actually switch on and what greps cleanly in
+logs; comparing URI strings in a `switch` is worse at every call site. The
+redundancy is a deliberate ergonomics trade, and `code` is the field documented
+as the contract.
+
+**Validation errors carry a field-level extension**, since one `detail` string
+cannot describe three bad fields:
+
+```json
+{
+  "type": "urn:glofox:problem:validation-failed",
+  "title": "Validation failed",
+  "status": 400,
+  "detail": "The request contains 2 invalid fields.",
+  "instance": "/v1/memberships/purchases",
+  "code": "validation_failed",
+  "errors": [
+    { "field": "member_name", "message": "must not be blank" },
+    { "field": "start_date",  "message": "must be a calendar date (YYYY-MM-DD)" }
+  ]
+}
+```
+
+`errors` appears only on `validation_failed`. Every other problem concerns the
+request as a whole, not a field of it.
 
 ### 3.6 Exception-to-status mapping
-How PRD AC-10's ten-row table is implemented — which exceptions exist, where they
-are translated, and how an unchecked `PaymentFailedException` is prevented from
-escaping as a `500`. Includes the `402`/`502` split from §1.7 and the distinct
-`start_date_in_past` code.
+
+**Domain exceptions are plain and HTTP-free.** No `HttpStatus`, no
+`@ResponseStatus`, nothing from `org.springframework.http` appears on them — the
+same NFR-4 argument as §3.1, applied to the error path. A `DomainException` base
+carrying its own status would be more compact and would put a web type in the
+domain, so it is rejected.
+
+**The web layer owns one table, in one `@RestControllerAdvice`:**
+
+```java
+private static final Map<Class<? extends Exception>, Problem> MAPPINGS = Map.of(
+    PlanNotFoundException.class,              problem(NOT_FOUND,   "plan_not_found"),
+    PurchaseNotFoundException.class,          problem(NOT_FOUND,   "purchase_not_found"),
+    PlanInactiveException.class,              problem(CONFLICT,    "plan_inactive"),
+    UnlimitedMembershipExistsException.class, problem(CONFLICT,    "unlimited_membership_exists"),
+    PlanSoldOutException.class,               problem(CONFLICT,    "plan_sold_out"),
+    StartDateInPastException.class,           problem(BAD_REQUEST, "start_date_in_past"),
+    PaymentDeclinedException.class,           problem(PAYMENT_REQUIRED, "payment_declined"),
+    PaymentGatewayUnavailableException.class, problem(BAD_GATEWAY, "payment_gateway_error"));
+```
+
+One handler performs the lookup; anything absent falls through to `500`
+`internal_error` with the cause logged and no detail leaked to the client.
+
+**The table is isomorphic to PRD AC-10 by design.** The specification table and
+the code table have the same rows in the same order, so a reviewer can diff them
+by eye and a new error is one row in each. That is the concrete answer to
+"where does the HTTP mapping live" — in exactly one place, in the web layer.
+
+**Three handlers sit outside the table**, because they translate framework
+exceptions rather than domain ones:
+
+| Exception | → | Note |
+|---|---|---|
+| `MethodArgumentTypeMismatchException` | `400 validation_failed` | Non-UUID path variable (§3.4) |
+| Jackson parse / `DateTimeParseException` | `400 validation_failed` | Malformed body or date; populates `errors` |
+| Bean-validation or hand-rolled failures | `400 validation_failed` | Mechanism decided in §1.5 |
+
+**`PaymentFailedException` is unchecked, so the table is what stops it becoming a
+`500`.** This is the trap `codebase-context.md` constraint 1 flags: nothing in
+the compiler forces anyone to handle it. Covering it by class in the mapping is
+what makes PRD AC-8a/8b observable rather than aspirational — and §1.7 must
+produce two distinct types for these two rows to exist.
+
+**The advice only translates.** §1.4.2's compensation stack has already unwound
+inventory and claims inside the service before the exception reaches here. The
+web layer never touches inventory, which is NFR-6 in one sentence.
 
 ---
 
@@ -572,8 +819,8 @@ Expanding top-to-bottom would mean rewriting §1.1–1.3 once §1.4 settles.
 ```
 ==================================================
 CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2
-LAST APPROVED: §1.4 concurrency and atomicity
-NEXT STEP: Review §2 (data models). On approval -> §1.1-1.3 and §1.5-1.8,
-           the remaining architecture, which the types now constrain.
+LAST APPROVED: §2 data models
+NEXT STEP: Review §3 (API contracts). Then §1.1-1.3 / §1.5-1.8 remain owed
+           -- §1.7 in particular, which §3.6's two payment rows depend on.
 ==================================================
 ```

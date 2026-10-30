@@ -6,10 +6,10 @@ Update it in the same turn that an artifact is approved and persisted.
 ```
 ==================================================
 CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2
-LAST APPROVED: TRD §1.4 concurrency and atomicity
-NEXT STEP: Review TRD §2 (data models). On approval -> §1.1-1.3 and
-           §1.5-1.8, the remaining architecture, which the types constrain.
-           Remaining sections stay unexpanded until reached.
+LAST APPROVED: TRD §2 data models
+NEXT STEP: Review TRD §3 (API contracts). Still owed: §1.1-1.3, §1.5-1.8,
+           §4, §5, §6 -- §1.7 especially, since §3.6's two payment rows
+           depend on it producing two distinct exception types.
 ==================================================
 ```
 
@@ -28,7 +28,8 @@ NEXT STEP: Review TRD §2 (data models). On approval -> §1.1-1.3 and
 | 2026-10-30 | 1 | PRD amendment — Q-1/Q-2/Q-3 | **Approved** — merged `6e74e3a` |
 | 2026-10-30 | 2 | `docs/02-trd/TRD.md` skeleton + expansion order | **Approved** |
 | 2026-10-30 | 2 | TRD §1.4 concurrency and atomicity | **Approved** |
-| 2026-10-30 | 2 | TRD §2 data models | Draft — awaiting review |
+| 2026-10-30 | 2 | TRD §2 data models | **Approved** |
+| 2026-10-30 | 2 | TRD §3 API contracts | Draft — awaiting review |
 
 ## Locked decisions
 
