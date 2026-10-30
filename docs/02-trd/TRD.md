@@ -1,15 +1,14 @@
 # TRD — Glofox Memberships Purchase API
 
-> **STATUS: Phase 2.2 in progress.** Skeleton approved. §1.4, §2, §3 approved.
-> **§4 expanded — awaiting review**, and §6 seeded with its findings. Still
-> unexpanded: §1.1–1.3, §1.5–1.8, §5. Sections are expanded **one at a time**,
-> each pausing for approval.
+> **STATUS: Phase 2.2 in progress.** Skeleton approved. §1.4, §2, §3, §4
+> approved; F-1/F-3/F-4 applied. **§5 expanded — awaiting review.**
+> Still unexpanded: **§1.1–1.3, §1.5–1.8** only.
 >
-> Expansion is running out of the proposed order at the author's direction: §3
-> and §4 were pulled ahead of the remaining architecture sub-sections.
+> Expansion ran out of the proposed order at the author's direction: §3, §4 and
+> §5 were pulled ahead of the remaining architecture sub-sections.
 >
-> ⚠️ **§4 found two amendments to already-approved sections** — F-1 (§1.4.2) and
-> F-3 (§2.5). Both are recorded in §6 as *pending*, not silently applied.
+> ⚠️ **§5 found a sixth issue, F-5** — PRD T-1's assertions were satisfiable by a
+> wrong implementation. Applied to PRD T-1; see §6.
 
 **Upstream:** [`docs/01-prd/PRD.md`](../01-prd/PRD.md) (approved `f54450b`, amended
 `6e74e3a` — Q-1/Q-2/Q-3 resolved) ·
@@ -92,6 +91,34 @@ it cannot deliver, so it is not a trade-off, it is a defect.
 
 Steps 4 and 5 are each a single atomic operation, not a held lock. Nothing is
 locked during step 6, which is the only slow step.
+
+**The unwind must not be able to throw (F-1).** "Unwind in reverse, rethrow"
+reads fine and hides a hole: if the first `release()` fails, every later claim
+leaks *and* the original exception is replaced by the cleanup's, so the client
+gets a misleading error over inconsistent state and the real cause vanishes from
+the logs. Required shape:
+
+```java
+catch (RuntimeException original) {
+    for (Runnable release : reversed(claims)) {
+        try { release.run(); }
+        catch (RuntimeException cleanupFailure) {
+            original.addSuppressed(cleanupFailure);   // keep the real cause
+            log.error("compensation failed", cleanupFailure);
+        }
+    }
+    throw original;
+}
+```
+
+Every release is attempted; failures attach to the original rather than
+replacing it. A failure handler that can fail is not a failure handler.
+
+**`catch (RuntimeException)`, deliberately not `catch (PaymentFailedException)`.**
+§1.7 has not yet decided whether the decline and outage types are siblings or
+subtypes. Catching the broad type is correct under either outcome; catching the
+payment type would, under the sibling design, miss one and silently keep a promo
+slot on every `502` (§4.9).
 
 #### 1.4.3 Two claims, one pattern
 
@@ -390,8 +417,21 @@ interface UnlimitedClaimStore {
 interface PurchaseStore {
     void save(Purchase purchase);
     Optional<Purchase> findById(UUID id);
+
+    // F-3, Tier 2 only: the status transition and the inventory restore
+    // must be one decision, not read-then-write.
+    boolean compareAndSetStatus(UUID id, PurchaseStatus expected, PurchaseStatus next);
 }
 ```
+
+**`compareAndSetStatus` exists because cancel has the same race as purchase
+(F-3).** Two concurrent cancels of one purchase both read `status = ACTIVE`, both
+pass a read-then-write guard, and both restore a slot — a 5-slot pack ends with
+6. Only the thread that wins the CAS restores inventory and releases the
+unlimited claim. In memory this is `ConcurrentHashMap.replace(key, old, new)`;
+in SQL it is `UPDATE purchases SET status='CANCELLED' WHERE id=? AND
+status='ACTIVE'` with rows-affected = 1 — the same shape as every other claim in
+§1.4.7, which is the point: cancel is not a special case, it is a fourth claim.
 
 **The purchase id is generated before step 4 of §1.4.2**, so the claim can
 record which purchase owns it.
@@ -990,28 +1030,188 @@ assertion arriving with it.
 
 ## 5. Test Strategy
 
+"Which tests you chose and why" is a stated evaluation criterion, so the
+*reasoning* here is part of the deliverable, not scaffolding around it.
+
 ### 5.1 Test levels
-Unit versus `@WebMvcTest` slice versus full `@SpringBootTest`, and which of PRD
-T-1…T-8 lands at which level — chosen for speed and precision, not symmetry.
+
+**The level is chosen by where the risk lives, never for symmetry.**
+
+| Level | Cost | Right for |
+|---|---|---|
+| Plain JUnit on the service, with **real** store implementations | ~ms, no Spring context | concurrency, business rules, compensation |
+| `@WebMvcTest` slice, service mocked | ~1s context | status mapping, JSON shape, request binding |
+| `@SpringBootTest` full context | seconds | wiring, bean overrides, one end-to-end path |
+
+**The critical call: concurrency tests use the real in-memory stores, not
+mocks.** The atomicity being tested *lives in the store* (§1.4.4) — mocking
+`InventoryStore` would mock away the system under test and leave a green suite
+proving nothing. This is the single most important choice in this section, and
+the one most likely to be got wrong by reflex.
+
+| Risk | Lives in | Level |
+|---|---|---|
+| T-1, T-3, T-12 — races | service + real store | plain JUnit |
+| T-2, T-10 — failure cleanup | service + real store + stub gateway | plain JUnit |
+| T-4, T-5, T-9, T-11 — rules | service + real store | plain JUnit |
+| T-7 — validation and error bodies | HTTP edge | `@WebMvcTest` |
+| T-8 — plan payload incl. inactive | HTTP edge | `@WebMvcTest` |
+| T-6 — round-trip, plus one `402` end-to-end | wiring | `@SpringBootTest` |
+
+**A Boot-specific cost worth knowing:** each distinct combination of
+`@MockitoBean` / `@TestConfiguration` produces a **separate application
+context**, and the context cache misses on every new combination. Scattering bean
+overrides across six classes means six context startups. Grouping full-context
+tests into one class with one override set keeps the suite seconds rather than
+tens of seconds — which matters when the whole budget is three hours.
 
 ### 5.2 Gateway substitution
-The Boot 4 mechanism (`@MockitoBean` or `@TestConfiguration` + `@Primary`) and
-why `@MockBean` is unavailable.
+
+`@MockBean` is **removed in Boot 4** (`codebase-context.md` constraint 5). But
+the more useful observation is that most of these tests need no framework at all:
+
+> **The port exists so that substitution is constructor injection, not an
+> annotation.** Reaching for `@MockitoBean` to replace a dependency the service
+> already takes as a parameter is using Spring to solve a problem plain Java
+> solved. Service-level tests pass a stub directly.
+
+| Need | Mechanism |
+|---|---|
+| Service-level failure tests (most of them) | hand-written stub passed to the constructor |
+| The one full-context test proving the override wires | `@MockitoBean PaymentGateway` |
+
+**Hand-written stubs beat Mockito mocks here, because they can count:**
+
+```java
+final class CountingGateway implements PaymentGateway {
+    final AtomicInteger charges = new AtomicInteger();
+    private final Supplier<PaymentResult> behaviour;
+
+    public PaymentResult charge(int amountCents, String memberName) {
+        charges.incrementAndGet();
+        return behaviour.get();        // succeed, or throw decline / unavailable
+    }
+}
+```
+
+**This counter catches a bug no outcome assertion can.** T-1 as stated in the
+PRD asserts five `201`s and a final counter of `0`. **A implementation that
+charged all twenty cards and persisted only five would pass both.** So T-1 must
+additionally assert `charges.get() == 5`: exactly five cards were charged, not
+twenty with fifteen silently abandoned. Added to the harness below.
 
 ### 5.3 Concurrency harness
-Barrier design, thread count, and the assertions that make NFR-1 non-flaky —
-including asserting the *final* inventory value, not just the success count.
+
+```java
+int attempts = 500;                         // 5 slots, 500 contenders
+var startGate = new CountDownLatch(1);
+var results   = new ConcurrentLinkedQueue<Outcome>();
+
+try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {   // Java 21
+    for (int i = 0; i < attempts; i++) {
+        pool.submit(() -> {
+            startGate.await();              // all released together
+            results.add(attemptPurchase());
+        });
+    }
+    startGate.countDown();
+}                                            // close() awaits termination
+```
+
+**Virtual threads, not a fixed platform pool.** Java 21 makes 500 concurrent
+attempts cheap, where 500 OS threads would not be. More contenders on five slots
+means a far better chance of hitting a narrow interleaving, which is the whole
+point. The toolchain is already on 21 — using it is free.
+
+**No `Thread.sleep` anywhere.** A start gate releases every thread at once;
+`close()` on the try-with-resources executor awaits termination. Sleeps are both
+slower and less reliable than a latch.
+
+**The assertions that make NFR-1 meaningful** — all four, because each catches a
+different wrong implementation:
+
+| Assert | Catches |
+|---|---|
+| exactly 5 × `201` | overselling |
+| every other result is `409 plan_sold_out` | wrong error for the losers |
+| `remaining_slots == 0` at the end | a counter that drifted below zero or never moved |
+| `gateway.charges.get() == 5` | charging everyone and keeping five |
+
+**The anti-pattern this section is written against:** a concurrency test that
+passes because the race window was never hit. Mitigated three ways — the start
+gate maximises interleaving, 500 contenders widen the odds, and **every
+assertion is on an invariant** rather than on an observed schedule, so even a
+fully serialised run still verifies correctness. `@RepeatedTest(10)` is the
+hardening option if time allows; one run at 500 contenders is the baseline.
+
+Each test constructs fresh stores, so repeated runs share no state.
 
 ### 5.4 Clock control in tests
-How T-9 pins a fixed clock for the past-date boundary while T-1 and T-3 need no
-clock control at all — the observable payoff of §1.6.
+
+```java
+Clock fixed = Clock.fixed(Instant.parse("2026-10-30T12:00:00Z"), ZoneOffset.UTC);
+```
+
+**The zone is pinned as well as the instant.** "Today" is
+`LocalDate.now(clock)`, so a fixed instant with a floating zone is still
+non-deterministic. AS-8 defines "today" by the server zone, which means tests
+must state one.
+
+**The payoff from §1.6 is observable right here:** T-1, T-3, T-4, T-5, T-11 and
+T-12 take `Clock.systemUTC()` and a far-future `start_date`, and need no clock
+control whatsoever. Only T-9 pins a clock. Had the active-unlimited rule been
+date-windowed (the D-2 alternative), every concurrency test would have needed a
+controlled clock — turning the hardest tests in the suite into the most fragile.
+
+**The one gap a test cannot close:** nothing stops a future `LocalDate.now()`
+with no argument from appearing in the domain. That is a code-review obligation,
+or an ArchUnit rule if a dependency were worth it here. Named rather than
+pretended away.
 
 ### 5.5 Coverage map
-PRD T-1…T-11 → test classes and method names.
+
+Six classes. Three contexts total (two slices, one full), so the context cache
+is used rather than thrashed.
+
+| Class | Level | Tests |
+|---|---|---|
+| `PurchaseServiceConcurrencyTest` | plain JUnit | T-1 oversell, T-3 duplicate unlimited, T-12 double cancel |
+| `PurchaseServicePaymentFailureTest` | plain JUnit | T-2 decline, T-10 outage — **one parameterised test over both modes** |
+| `PurchaseServiceRulesTest` | plain JUnit | T-4 null inventory, T-5 inactive plan, T-9 date boundary, T-11 cancel-then-repurchase |
+| `PurchaseControllerValidationTest` | `@WebMvcTest` | T-7 validation matrix and error bodies |
+| `PlanControllerTest` | `@WebMvcTest` | T-8 four plans incl. inactive, null vs 0 |
+| `PurchaseApiIntegrationTest` | `@SpringBootTest` | T-6 round-trip and `404`, plus one `402` proving the override wires |
+
+**T-2 and T-10 are deliberately one parameterised test**, not two. §4.9's whole
+point is that the second failure mode is where the cleanup guarantee gets
+dropped; parameterising means a future third mode cannot be added without its
+cleanup assertions coming along.
 
 ### 5.6 Deliberately untested
-What is left uncovered inside the timebox, and why that is the right trade — this
-answers evaluation criterion #4 directly.
+
+Answering evaluation criterion #4 directly: coverage is not the goal, retired
+risk is.
+
+| Not tested | Why |
+|---|---|
+| W-2 charged-but-not-persisted | Needs a crash between two statements. Untestable in-process without instrumenting production code, which would be worse than the risk |
+| W-3 reservation leak | Requires killing a thread mid-flight; the mitigation (TTLs) is out of scope anyway |
+| Cross-instance oversell (AS-4) | Single process by assignment; a test would assert a known non-goal |
+| Midnight-crossing rejection (§4.8) | Needs the clock to advance *during* one request. Cost far exceeds a rare, retryable transient |
+| Response-serialisation failure after `201` | Status already committed; no behaviour to assert |
+| Throughput / latency | Not a requirement. NFR-1 is about correctness under concurrency, not speed |
+| Byte-exact JSON snapshots | Brittle against field ordering, and T-7/T-8 already assert the fields that are contractual |
+| Tier 3 idempotency | Only if reached |
+| Getters, records, enum round-trips | Testing the compiler |
+
+**One borderline case, declared rather than quietly dropped:** the
+`Locale.ROOT` fix in §2.4 defends against a *default-locale* bug, so
+`new MemberKey("ALICE").equals(new MemberKey("alice"))` passes whether or not the
+fix is present. Genuinely testing it means setting the JVM default locale to
+Turkish and restoring it — global mutable state in a test, with leakage risk
+across a parallel suite. Declined for a three-hour exercise; the reasoning is
+recorded in §2.4 where a reviewer will find it, and it is an honest answer if
+asked "how do you know that line is right?"
 
 ---
 
@@ -1022,19 +1222,25 @@ sections above. Closed last.
 
 ### Findings from the §4 audit
 
-**Two of these amend sections that are already approved, so they are pending
-approval rather than applied.**
+**All four applied** (approved 2026-10-30). Retained here as the audit trail —
+each one amended a section that had already been signed off, which is what the
+audit section exists to catch.
 
-| # | Finding | Touches | Status |
+| # | Finding | Applied to | Status |
 |---|---|---|---|
-| **F-1** | The compensation unwind can itself throw, losing the original cause and leaking later claims. Needs per-release `try`/`catch` with `addSuppressed` | **§1.4.2 (approved)** | ⏸ amendment pending |
-| **F-2** | §3.5's batched `errors` array and AC-11's `start_date_in_past` code cannot both describe one response. Resolved: batch shape errors, fail fast on semantics | §3.5, §4.5, PRD AC-11 | ✅ resolved in §4.5 |
-| **F-3** | Concurrent double-cancel over-credits inventory. `PurchaseStore` needs `compareAndSetStatus` — read-then-write cannot express it | **§2.5 (approved)** | ⏸ amendment pending, Tier 2 only |
-| **F-4** | A second cancel needs `409 purchase_already_cancelled`, a code PRD AC-10 lacks | PRD AC-10 | ⏸ PRD amendment, Tier 2 only |
+| **F-1** | The compensation unwind can itself throw, losing the original cause and leaking later claims. Needs per-release `try`/`catch` with `addSuppressed` | §1.4.2 | ✅ applied |
+| **F-2** | §3.5's batched `errors` array and AC-11's `start_date_in_past` code cannot both describe one response. Resolved: batch shape errors, fail fast on semantics | §4.5 | ✅ applied |
+| **F-3** | Concurrent double-cancel over-credits inventory. `PurchaseStore` needs `compareAndSetStatus` — read-then-write cannot express it | §2.5 | ✅ applied *(Tier 2)* |
+| **F-4** | A second cancel needs `409 purchase_already_cancelled` | PRD AC-10 → D-10, T-12 | ✅ applied *(Tier 2)* |
+| **F-5** | PRD T-1's assertions were satisfiable by a wrong implementation: charging all contenders and persisting only five yields 5 × `201` and a final counter of `0`. Needs a fourth assertion on the gateway's charge count | §5.2, §5.3 → PRD T-1 | ✅ applied *(new, from §5)* |
 
-F-1 is the only one affecting committed Tier 0/1 scope. F-3 and F-4 are inert
-unless Tier 2 is reached, but are recorded now because discovering them at hour
-three would be worse.
+F-1 was the only one affecting committed Tier 0/1 scope. F-3 and F-4 are inert
+unless Tier 2 is reached, but folding them in now cost minutes where discovering
+them at hour three would have cost the tier.
+
+**F-3 also added PRD T-12**, which is the test that matters: T-11 (cancel then
+repurchase) passes even with the F-3 bug present, because it never cancels twice.
+Only asserting the counter's final value after two concurrent cancels catches it.
 
 ### Deferred by design
 
@@ -1068,8 +1274,8 @@ Expanding top-to-bottom would mean rewriting §1.1–1.3 once §1.4 settles.
 ```
 ==================================================
 CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2
-LAST APPROVED: §3 API contracts
-NEXT STEP: Review §4 (edge cases) AND decide on F-1/F-3 amendments to the
-           approved §1.4.2 and §2.5. Then §1.1-1.3, §1.5-1.8, §5 remain.
+LAST APPROVED: §4 edge cases; F-1/F-3/F-4 applied
+NEXT STEP: Review §5 (test strategy) and F-5. Then only §1.1-1.3 and
+           §1.5-1.8 remain -- §1.7 owed to §3.6 and §4.9.
 ==================================================
 ```

@@ -6,10 +6,10 @@ Update it in the same turn that an artifact is approved and persisted.
 ```
 ==================================================
 CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2
-LAST APPROVED: TRD §3 API contracts
-NEXT STEP: Review TRD §4 (edge cases) and decide F-1/F-3, which amend the
-           already-approved §1.4.2 and §2.5. Still owed: §1.1-1.3,
-           §1.5-1.8, §5.
+LAST APPROVED: TRD §4 edge cases; findings F-1/F-3/F-4 applied
+NEXT STEP: Review TRD §5 (test strategy) and new finding F-5. Only
+           §1.1-1.3 and §1.5-1.8 then remain -- §1.7 is owed to §3.6
+           and §4.9, which both depend on it.
 ==================================================
 ```
 
@@ -30,16 +30,21 @@ NEXT STEP: Review TRD §4 (edge cases) and decide F-1/F-3, which amend the
 | 2026-10-30 | 2 | TRD §1.4 concurrency and atomicity | **Approved** |
 | 2026-10-30 | 2 | TRD §2 data models | **Approved** |
 | 2026-10-30 | 2 | TRD §3 API contracts | **Approved** |
-| 2026-10-30 | 2 | TRD §4 edge cases + §6 findings | Draft — awaiting review |
+| 2026-10-30 | 2 | TRD §4 edge cases + §6 findings | **Approved** |
+| 2026-10-30 | 2 | TRD §5 test strategy | Draft — awaiting review |
 
-### Open findings from the §4 audit
+### Findings log
 
 | # | Amends | Scope | Status |
 |---|---|---|---|
-| F-1 | §1.4.2 (approved) — unwind must not throw; `addSuppressed` | **Tier 0/1** | Pending approval |
-| F-2 | §3.5 / AC-11 reconciliation | Tier 0/1 | Resolved in §4.5 |
-| F-3 | §2.5 (approved) — `PurchaseStore.compareAndSetStatus` | Tier 2 only | Pending approval |
-| F-4 | PRD AC-10 — `409 purchase_already_cancelled` | Tier 2 only | Pending PRD amendment |
+| F-1 | §1.4.2 — unwind must not throw; `addSuppressed` | **Tier 0/1** | ✅ Applied |
+| F-2 | §4.5 — batch shape errors, fail fast on semantics | Tier 0/1 | ✅ Applied |
+| F-3 | §2.5 — `PurchaseStore.compareAndSetStatus` | Tier 2 | ✅ Applied |
+| F-4 | PRD AC-10 → D-10, T-12 — `purchase_already_cancelled` | Tier 2 | ✅ Applied |
+| F-5 | PRD T-1 — fourth assertion on gateway charge count | **Tier 0/1** | ✅ Applied, **new from §5** |
+
+PRD now carries 10 decisions and 12 tests. F-4/F-5's PRD edits sit on
+`phase/02-trd` and reach `main` when the TRD merges.
 
 ## Locked decisions
 
