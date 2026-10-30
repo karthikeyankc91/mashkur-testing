@@ -294,6 +294,10 @@ from a common barrier: exactly 5 return `201`, the remainder return `409
 plan_sold_out`, and `remaining_slots` settles at exactly `0`. Never negative.
 Never `>0` while requests were rejected. Repeatable, not flaky.
 
+Twenty is the floor this requirement sets; T-1 uses **500** virtual threads,
+because more contenders on five slots materially widens the chance of hitting a
+narrow interleaving and Java 21 makes them cheap.
+
 ### NFR-2 — Atomicity without transactions
 In-memory storage provides no rollback, and the gateway cannot enlist in one.
 Therefore **the ordering of charge and inventory mutation is the consistency
@@ -411,7 +415,7 @@ itself part of the submission.
 | **T-9** | `start_date` of yesterday → `400 start_date_in_past`; today → `201` | AC-11, with a pinned clock. The today boundary is the off-by-one |
 | **T-10** | Gateway outage → `502 payment_gateway_error`, no purchase, inventory unchanged | AC-8b. Must assert the *same* cleanup as T-2, or the new branch silently skips it |
 | **T-11** | Cancel an unlimited, then repurchase → `201` *(Tier 2 only)* | D-9 |
-| **T-12** | Concurrent double-cancel of one promo purchase: one succeeds, one `409 purchase_already_cancelled`, slot restored **exactly once** *(Tier 2 only)* | D-10 / TRD F-3 — the restore path has the same check-then-act race as the decrement, and only the counter's final value catches it |
+| **T-12** | Concurrent double-cancel of one promo purchase: one `200`, one `409 purchase_already_cancelled`, slot restored **exactly once** *(Tier 2 only)* | D-10 / TRD F-3 — the restore path has the same check-then-act race as the decrement, and only the counter's final value catches it |
 
 T-1 through T-4 are the submission's spine. T-5 through T-10 are cheap and fast.
 T-11 and T-12 exist only if Tier 2 is reached — and T-12 is the one that matters,

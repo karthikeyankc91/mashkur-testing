@@ -1,15 +1,17 @@
 # TRD — Glofox Memberships Purchase API
 
-> **STATUS: Phase 2.2 complete — every section expanded.** §1.4, §2, §3, §4, §5
-> approved; F-1 through F-5 applied. **§1.1–1.3 and §1.5–1.8 expanded, awaiting
-> review.**
+> **STATUS: Phase 2.3 complete — awaiting approval of the whole document.**
+> All 35 sub-sections expanded (2.2) and reviewed in four passes (2.3):
+> cross-section consistency, requirement traceability, undecided language, and
+> the README's evaluation criteria. Findings **F-1…F-5** and **R-1…R-6** applied;
+> all are retained in §6 as the audit trail.
 >
 > Expansion ran out of the proposed order at the author's direction: §3, §4 and
 > §5 were pulled ahead of the remaining architecture sub-sections, and §1.7 was
 > taken before §1.1–1.3 to discharge what §3.6 and §4.9 had promised.
 >
-> **Next after review: Phase 2.3** — the multi-pass review loop over the whole
-> document, which is where cross-section contradictions get caught.
+> **Next after approval: Phase 3** — modular implementation plan, one Markdown
+> step file per milestone, generated from §6's traceability matrix.
 
 **Upstream:** [`docs/01-prd/PRD.md`](../01-prd/PRD.md) (approved `f54450b`, amended
 `6e74e3a` — Q-1/Q-2/Q-3 resolved) ·
@@ -202,20 +204,24 @@ it cannot deliver, so it is not a trade-off, it is a defect.
 **Reserve first, then charge — chosen.**
 
 ```
-1. plan   = catalogue.find(planId)              // 404 plan_not_found
-2.          plan.requireActive()                // 409 plan_inactive
-3. claims = []                                  // compensation stack
-4.          if plan is unlimited:
-              tryClaim(memberKey)   or 409 unlimited_membership_exists
-              claims.push(releaseClaim)
-5.          if plan has finite inventory:
-              tryReserve(planId)    or 409 plan_sold_out
-              claims.push(releaseSlot)
-6. result = gateway.charge(amountCents, memberName)   // no lock held
-                                                 // 402 declined / 502 outage
-7.          purchases.save(purchase)
+1. plan   = catalogue.find(planId)                 // 404 plan_not_found
+2.          if (!plan.active())                    // 409 plan_inactive
+                throw new PlanInactiveException(plan.id())
+3. purchaseId = UUID.randomUUID()                  // needed by step 4's claim
+   claims     = []                                 // compensation stack
+4.          if (plan.type() == UNLIMITED):
+              claims.tryClaim(memberKey, purchaseId)
+                                   or 409 unlimited_membership_exists
+              push(() -> claims.release(memberKey, purchaseId))
+5.          if (inventory.remaining(planId).isPresent()):
+              inventory.tryReserve(planId)
+                                   or 409 plan_sold_out
+              push(() -> inventory.release(planId))
+6. result = gateway.charge(amountCents, memberName)  // no lock held
+                                                    // 402 declined / 502 outage
+7.          purchases.save(purchase(purchaseId, ...,  result.transactionId()))
 8. return purchase
-   ---- on ANY throw after step 3: unwind claims in reverse, rethrow ----
+   ---- on ANY throw after step 3: unwind claims in reverse, rethrow (F-1) ----
 ```
 
 Steps 4 and 5 are each a single atomic operation, not a held lock. Nothing is
@@ -257,10 +263,16 @@ pattern is why NFR-3 gets solved for free rather than forgotten.
 
 | | Inventory (NFR-1) | Unlimited slot (NFR-3) |
 |---|---|---|
-| Claim | `tryReserve(planId) -> boolean` | `tryClaim(memberKey) -> boolean` |
-| Release | `release(planId)` | `release(memberKey)` |
+| Claim | `tryReserve(planId) -> boolean` | `tryClaim(memberKey, purchaseId) -> boolean` |
+| Release | `release(planId)` | `release(memberKey, purchaseId) -> boolean` |
 | Exhausted when | counter would go below zero | key already present |
 | Released by | payment failure | payment failure, and cancel (D-9) |
+
+The unlimited release carries the purchase id so it maps to the value-safe
+`ConcurrentHashMap.remove(key, value)` (§2.5). Its `boolean` is discarded by the
+compensation stack, which holds `Runnable`s — but a `false` there means we did
+not own the claim we were releasing, which cannot happen on the failure path and
+is therefore logged as an invariant breach rather than ignored.
 
 Both are **claim-or-fail with a compensating release**, which keeps the service
 free of any locking vocabulary. Provisional signatures; §2.5 finalises them.
@@ -343,8 +355,16 @@ direct SQL analogue. Both do:
 |---|---|---|
 | `tryReserve(planId)` | `UPDATE plans SET remaining_slots = remaining_slots - 1 WHERE id = ? AND remaining_slots > 0` | rows-affected = 1 |
 | `release(planId)` | `UPDATE plans SET remaining_slots = remaining_slots + 1 WHERE id = ?` | single statement |
-| `tryClaim(memberKey)` | `INSERT INTO unlimited_claims(member_key) VALUES (?)` | unique constraint violation = lost |
-| `release(memberKey)` | `DELETE FROM unlimited_claims WHERE member_key = ?` | single statement |
+| `tryClaim(memberKey, purchaseId)` | `INSERT INTO unlimited_claims(member_key, purchase_id) VALUES (?, ?)` | unique constraint on `member_key`; violation = lost |
+| `release(memberKey, purchaseId)` | `DELETE FROM unlimited_claims WHERE member_key = ? AND purchase_id = ?` | rows-affected = 1 |
+| `compareAndSetStatus(id, ACTIVE, CANCELLED)` | `UPDATE purchases SET status='CANCELLED' WHERE id = ? AND status='ACTIVE'` | rows-affected = 1 |
+
+**The `AND purchase_id = ?` in the `DELETE` is load-bearing**, not defensive
+padding. It is what preserves the guarantee §2.5 bought with the two-argument
+`ConcurrentHashMap.remove(key, value)`: a stale cancel must not delete a claim
+that now belongs to a *newer* purchase. Drop that predicate and the SQL
+implementation is subtly less correct than the in-memory one — which is exactly
+the kind of divergence an "it would swap cleanly" claim is supposed to rule out.
 
 The service expresses *what* must be atomic — claim or fail — and never *how*.
 Swapping the store substitutes a conditional `UPDATE` and a unique index for a
@@ -1255,6 +1275,13 @@ more to a client than batching two rare cases.
 | Cancel an `ACTIVE` **unlimited** membership | claim released via `release(key, purchaseId)`; D-9 frees the member |
 | Cancel an already-`CANCELLED` purchase | rejected — see F-4 |
 | Cancel an unknown id | `404 purchase_not_found` |
+| Cancel a malformed id | `400 validation_failed` — same boundary as §3.4 |
+
+**Success returns `200` with the updated purchase** (R-4), in the §3.3 payload
+shape with `status: "cancelled"`. Not `204`: the client's reason for cancelling
+is to observe the new state, and the same response body also lets it re-read the
+restored `remaining_slots` on a subsequent `GET /v1/plans` without guessing. One
+assembler, three endpoints.
 
 **F-3 — concurrent double-cancel over-credits inventory, and §2.5 cannot prevent
 it.** Two simultaneous cancels of the same purchase both read `status = ACTIVE`,
@@ -1571,6 +1598,93 @@ them at hour three would have cost the tier.
 repurchase) passes even with the F-3 bug present, because it never cancels twice.
 Only asserting the counter's final value after two concurrent cancels catches it.
 
+### Pass 1 of the Phase 2.3 review — cross-section consistency
+
+Mechanical cross-reference checks (section refs, error codes, test ids, port
+method arity) plus a read for contradictions between sections written at
+different times. **Five found, all applied.** Four were contradictions *between
+already-approved sections*, which is the specific failure mode a document
+expanded one section at a time is prone to.
+
+| # | Finding | Applied to |
+|---|---|---|
+| **R-1** | §1.4.2's flow wrote `plan.requireActive()` — a throwing method on the domain object, which **§1.3 explicitly rejects** in favour of keeping the decision in the service. Now `if (!plan.active()) throw …` | §1.4.2 |
+| **R-2** | §1.4.2, §1.4.3 **and §1.4.7** called `tryClaim(memberKey)` / `release(memberKey)` with one argument, while §2.5 declares two. §1.4 predated the purchase-id argument F-3's analysis motivated. §1.4.7's SQL analogue was worse than stale: its `DELETE … WHERE member_key = ?` dropped the predicate that makes the in-memory version value-safe, so the "swaps cleanly to SQL" proof asserted a *less* correct implementation | §1.4.2, §1.4.3, §1.4.7 |
+| **R-3** | The purchase id was **never generated** in §1.4.2's flow, although §2.5 states it exists before step 4 and step 7 saves a `Purchase` that needs one. Folded into step 3, so no step numbers moved and no cross-reference broke | §1.4.2 |
+| **R-4** | **Cancel's success response was undefined.** D-10 specified the double-cancel `409` and T-11 the repurchase `201`, but nothing said what a successful cancel returns. Now `200` with the updated purchase | §4.6, PRD T-12 |
+| **R-5** | PRD NFR-1 said "at least 20 concurrent" while T-1 had moved to 500 — not contradictory, but the floor read as stale. NFR-1 now states both and why they differ | PRD NFR-1 |
+
+R-1 is the most instructive: §1.3 was written *after* §1.4 and argued carefully
+against rich-domain rejection, without anyone going back to change the
+pseudo-code §1.4 had already shipped. A later section won the argument and the
+earlier one kept the losing code.
+
+### Pass 2 of the Phase 2.3 review — traceability
+
+No coverage gaps: every PRD requirement is satisfied somewhere. But a mechanical
+check showed the TRD cites `Q-` numbers and section numbers while rarely citing
+PRD requirement ids, so coverage could not be *verified* without reading all
+1,600 lines.
+
+**R-6 — fixed with one matrix rather than twenty scattered citations.** This is
+also what Phase 3 reads to split work into step files, and what answers "show me
+where requirement X is handled" in the follow-up.
+
+| PRD | Satisfied by |
+|---|---|
+| FR-1 seeding | §1.8, §2.6 |
+| FR-2 `GET /plans` | §3.2, §2.2 |
+| FR-3 `POST /purchases` | §1.4.2, §4.5 |
+| FR-4 `GET /purchases/{id}` | §3.4 |
+| FR-5 business rules (a–f) | §1.3, §1.4, §4 |
+| FR-6 purchase payload | §2.1, §3.3 |
+| FR-7 error contract | §3.5, §3.6 |
+| NFR-1 no oversell | §1.4.4, §5.3 |
+| NFR-2 atomicity without transactions | §1.4.2, §4.3 |
+| NFR-3 one-unlimited race | §1.4.3, §4.4 |
+| NFR-4 swappable storage | §1.2, §1.4.7, §2.5 |
+| NFR-5 testability and determinism | §1.6, §5.2, §5.4 |
+| NFR-6 rule placement | §1.1, §1.3 |
+| NFR-7 timebox discipline | PRD §10 tiers; TRD §4.7 ranks Tier 3 last and says why |
+| NFR-8 readability over cleverness | §1.4.5, §1.5, §2.1 |
+| NFR-9 startup observability | §1.8 |
+| AC-1…AC-4 | §1.8, §3.2, §3.3, §3.4 |
+| AC-5 inactive plan | §1.4.2 step 2 |
+| AC-6 one active unlimited | §4.4 |
+| AC-7 promo inventory | §1.4.4, §4.1 |
+| AC-8 / 8a / 8b payment failure | §1.7, §4.9 |
+| AC-9 purchase payload | §3.3 |
+| AC-10 status and code table | §3.6 |
+| AC-11 past `start_date` | §1.6, §4.8 |
+| D-1 … D-10 | §3.1, §5.4, §3.5, §2.4, §4.4, §1.7, §2.1, §1.6, §4.6, §4.6 respectively |
+| T-1 … T-12 | §5.5 coverage map |
+
+### Pass 3 of the Phase 2.3 review — no undecided language
+
+Scanned for `TBD`, `TODO`, "candidate:", "to be decided", "will choose", and
+question-mark headings. **Zero hits.** Every section that posed a question in the
+skeleton now answers it, which is the bar Phase 2.2 was meant to clear.
+
+### Pass 4 of the Phase 2.3 review — against the README's evaluation criteria
+
+The six axes the brief says it grades on, and where each is answered. Four of
+the six are about reasoning rather than output, so this is the check that
+matters most for the follow-up.
+
+| Criterion | Answered in |
+|---|---|
+| 1. Correctness under the rules, incl. payment failure and promo inventory | §1.4, §4, §5.3 |
+| 2. **Where the rules live** — handler vs service vs storage, and why | §1.3 — "domain objects answer questions, the service makes decisions, stores make guarantees" |
+| 3. **Concurrency**, especially the last promo slots | §1.4.4 mechanism, §1.4.5 rejected alternatives, §5.3 harness |
+| 4. **Tests** — which ones and why | §5.1 level-by-risk, §5.5 map, §5.6 what is deliberately uncovered |
+| 5. **Trade-offs you can defend** | Rejected-with-reasons in §1.4.5, §1.5, §1.7, §2.1, §2.3, §3.1, §3.2 |
+| 6. **Ownership** — walk through and modify it | Not a document property. What the document supplies is the *why* behind each decision; §6's W-, F- and R- logs are the honest-limitations list |
+
+**Criterion 5 is the one this document is actually built around.** Every
+significant section names what was rejected and why, because "simple and clear
+beats clever and opaque" is only demonstrable if the clever option is shown to
+have been considered.
+
 ### Deferred by design
 
 | Item | Why deferred | Named in |
@@ -1602,9 +1716,9 @@ Expanding top-to-bottom would mean rewriting §1.1–1.3 once §1.4 settles.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2 done
-LAST APPROVED: §5 test strategy; F-5 applied
-NEXT STEP: Review §1.1-1.3 and §1.5-1.8. On approval -> Phase 2.3, the
-           multi-pass review loop over the complete document.
+CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.3 done
+LAST APPROVED: §1.1-1.3, §1.5-1.8 -- Phase 2.2 complete
+NEXT STEP: Approve the TRD as a whole. On approval -> merge phase/02-trd to
+           main and open phase/03-impl for Phase 3 step files.
 ==================================================
 ```

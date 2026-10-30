@@ -6,10 +6,10 @@ Update it in the same turn that an artifact is approved and persisted.
 ```
 ==================================================
 CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2
-LAST APPROVED: TRD §5 test strategy; finding F-5 applied
-NEXT STEP: Review TRD §1.1-1.3 and §1.5-1.8 -- the last unexpanded
-           sections. On approval, Phase 2.2 is complete and Phase 2.3
-           (multi-pass review of the whole TRD) begins.
+LAST APPROVED: TRD §1.1-1.3, §1.5-1.8 -- Phase 2.2 complete
+NEXT STEP: Approve the TRD as a whole (Phase 2.3 review done, 4 passes,
+           R-1..R-6 applied). On approval -> merge phase/02-trd to main,
+           open phase/03-impl, begin Phase 3 step files.
 ==================================================
 ```
 
@@ -32,7 +32,19 @@ NEXT STEP: Review TRD §1.1-1.3 and §1.5-1.8 -- the last unexpanded
 | 2026-10-30 | 2 | TRD §3 API contracts | **Approved** |
 | 2026-10-30 | 2 | TRD §4 edge cases + §6 findings | **Approved** |
 | 2026-10-30 | 2 | TRD §5 test strategy | **Approved** |
-| 2026-10-30 | 2 | TRD §1.7 + §1.1-1.3 + §1.5, §1.6, §1.8 | Draft — awaiting review |
+| 2026-10-30 | 2 | TRD §1.7 + §1.1-1.3 + §1.5, §1.6, §1.8 | **Approved** |
+| 2026-10-30 | 2 | TRD Phase 2.3 review, 4 passes, R-1..R-6 | Draft — awaiting review |
+
+### Phase 2.3 review findings
+
+| # | Finding | Status |
+|---|---|---|
+| R-1 | §1.4.2 used `plan.requireActive()`, which §1.3 explicitly rejects | ✅ Applied |
+| R-2 | `tryClaim`/`release` arity mismatch across §1.4.2, §1.4.3, §1.4.7; §1.4.7's SQL `DELETE` also dropped the value-safe predicate | ✅ Applied |
+| R-3 | Purchase id never generated in §1.4.2's flow | ✅ Applied (folded into step 3, no renumbering) |
+| R-4 | Cancel's success response was undefined | ✅ Applied — `200` with updated purchase |
+| R-5 | PRD NFR-1's "≥20 concurrent" read stale against T-1's 500 | ✅ Applied |
+| R-6 | No way to mechanically verify requirement coverage | ✅ Applied — traceability matrix in §6 |
 
 ### Findings log
 
