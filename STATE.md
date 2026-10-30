@@ -5,30 +5,73 @@ Update it in the same turn that an artifact is approved and persisted.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 0 [Bootstrap] -> Sub-Phase 0.1
-LAST APPROVED: Repository scaffold (AGENTS.md, CLAUDE.md, context/, docs/)
-NEXT STEP: Awaiting user-supplied codebase context, skeleton tasks, and
-           constraints in context/ — then begin Phase 1 PRD draft.
+CURRENT PHASE: Phase 1 [High-Level Scoping & PRD] -> Sub-Phase 1.2
+LAST APPROVED: Plan approved (skeleton import + wrapper fix + PRD scope)
+NEXT STEP: Review docs/01-prd/PRD.md. On approval -> merge phase/01-prd to
+           main, then open phase/02-trd and begin Phase 2.1 (TRD skeleton).
 ==================================================
 ```
 
-## Approval log
+**Branch:** `phase/01-prd` — merges to `main` on PRD approval
+**Project:** Glofox Memberships Purchase API take-home (Java 21 / Spring Boot 4.0.0)
 
-Append one row per approved artifact. This is the audit trail that lets a cold
-session reconstruct what was settled and what is still open.
+## Approval log
 
 | Date | Phase | Artifact | Status |
 |---|---|---|---|
 | 2026-10-30 | 0 | Repo scaffold + agent operating contract | Approved |
+| 2026-10-30 | 0 | `55036b4` skeleton vendor import (unmodified) | Done |
+| 2026-10-30 | 0 | `9f52e7a` gradle wrapper path fix | Done, verified |
+| 2026-10-30 | 1 | `context/` filled from verified skeleton | Done |
+| 2026-10-30 | 1 | `docs/01-prd/PRD.md` | **Draft — awaiting review** |
+
+## Locked decisions
+
+Full reasoning in PRD §9. Summarised here so a cold session does not re-litigate.
+
+| # | Decision | Choice |
+|---|---|---|
+| D-1 | JSON naming | `snake_case` |
+| D-2 | "Active unlimited" | Status-only, dates ignored (keeps domain clock-free) |
+| D-3 | Error shape | RFC 9457 `ProblemDetail` + `code` extension |
+| D-4 | Member identity | Trim + case-fold match key; store as submitted |
+| D-5 | Name uniqueness beyond unlimited | None |
+| D-6 | Payment failure status | `402` / `payment_declined` |
+| D-7 | Plan reference on purchase | Snapshot, not bare `plan_id` |
+
+**Scope:** Tier 0 core + Tier 1 error codes committed. Tier 2 (cancel) and
+Tier 3 (idempotency) gated — PRD §10.
 
 ## Open questions
 
-Questions asked but not yet answered. Carry these across sessions; clear them as
-they are resolved.
+Carried across sessions. Clear as resolved.
 
-- _(none — Phase 1 has not started)_
+- **Q-1** Reject `start_date` in the past? Currently accepted (AS-5). No rule in
+  the brief; needs a product answer.
+- **Q-2** Does cancelling an unlimited membership immediately free the member to
+  buy another? Only matters if Tier 2 is reached. Proposed: yes.
+- **Q-3** Split payment decline (`402`) from gateway outage (`502`)? Blocked —
+  the port cannot distinguish them today.
+
+## Verified build health
+
+```
+./gradlew --version   -> Gradle 9.5.1 on JVM 22.0.1
+./gradlew test        -> BUILD SUCCESSFUL (contextLoads)
+```
 
 ## Blockers
 
-- `context/codebase-context.md`, `context/tasks.md`, and `context/constraints.md`
-  are placeholders. Phase 1 cannot start until they are filled in.
+None. `context/` is filled; the build runs.
+
+## Carried risks for Phase 2
+
+Not blockers, but the TRD must address each. Detail in
+`context/codebase-context.md`.
+
+1. `@MockBean` is **removed in Boot 4** — the failing-gateway test needs
+   `@MockitoBean` or `@TestConfiguration` + `@Primary`.
+2. No `spring-boot-starter-validation` on the classpath — add it or hand-roll.
+3. `remainingSlots == null` means *unlimited*, not zero (3 of 4 plans).
+4. `PaymentFailedException` is unchecked — easy to leak a `500` over partial state.
+5. NFR-2 ordering (charge vs decrement) is the TRD's central decision.

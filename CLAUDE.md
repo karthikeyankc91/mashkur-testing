@@ -41,9 +41,13 @@ code in this repository.
 
 ## Git conventions
 
-`main` is the only branch; this is a single-author planning repo, so work commits
-directly to it. Commit one artifact or one approved section per commit, with the
-phase as the subject prefix:
+One branch per phase, named `phase/0N-<slug>` (e.g. `phase/01-prd`). A phase branch
+merges to `main` only when its artifact is approved — so `main` holds settled work
+and the branch holds whatever is still being argued about. Never start the next
+phase's branch off an unmerged one.
+
+Commit one artifact or one approved section per commit, with the phase as the
+subject prefix:
 
 ```
 phase-2: approve TRD section 3 — API contracts
