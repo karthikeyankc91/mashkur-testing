@@ -1,11 +1,15 @@
 # TRD — Glofox Memberships Purchase API
 
-> **STATUS: Phase 2.2 in progress.** Skeleton approved. §1.4, §2 approved.
-> **§3 expanded — awaiting review.** Still unexpanded: §1.1–1.3, §1.5–1.8, §4,
-> §5, §6. Sections are expanded **one at a time**, each pausing for approval.
+> **STATUS: Phase 2.2 in progress.** Skeleton approved. §1.4, §2, §3 approved.
+> **§4 expanded — awaiting review**, and §6 seeded with its findings. Still
+> unexpanded: §1.1–1.3, §1.5–1.8, §5. Sections are expanded **one at a time**,
+> each pausing for approval.
 >
-> Expansion is running out of the §2.1 proposed order at the author's direction:
-> §3 was pulled ahead of the remaining architecture sub-sections.
+> Expansion is running out of the proposed order at the author's direction: §3
+> and §4 were pulled ahead of the remaining architecture sub-sections.
+>
+> ⚠️ **§4 found two amendments to already-approved sections** — F-1 (§1.4.2) and
+> F-3 (§2.5). Both are recorded in §6 as *pending*, not silently applied.
 
 **Upstream:** [`docs/01-prd/PRD.md`](../01-prd/PRD.md) (approved `f54450b`, amended
 `6e74e3a` — Q-1/Q-2/Q-3 resolved) ·
@@ -730,39 +734,257 @@ web layer never touches inventory, which is NFR-6 in one sentence.
 
 ## 4. Edge Cases
 
+> **This section is an audit of §1–3, not new design.** Its job is to find gaps
+> while they are still cheap. It found four that change earlier sections — F-1
+> through F-4, collected in §6.
+
 ### 4.1 `remaining_slots: null` versus `0`
-The one-character bug (PRD T-4), and the type-level guard against it.
+
+§2.3 removed the bug class structurally: no entry means unlimited, so there is
+no `remaining > 0` to invert. What remains is a boundary table and one rule that
+must not be broken later.
+
+| State | `tryReserve` | `GET /v1/plans` shows |
+|---|---|---|
+| No entry (unlimited inventory) | `true`, always | `null` |
+| Entry, value `> 0` | `true`, decrements | the number |
+| Entry, value `0` | `false` → `409 plan_sold_out` | `0` |
+
+`0` and `null` are therefore **distinguishable on the wire**, which they must be:
+`0` means "this offer is finite and gone", `null` means "no limit applies". A
+client showing "5 left" cannot conflate them.
+
+**The rule that protects this:** `remaining()` returns `OptionalInt` and **no
+`int`-returning overload is ever added.** A convenience method returning `0` for
+unlimited would reintroduce PRD T-4 in one line, at a call site far from here.
+The seed mapping must also not special-case `0` as unlimited — a plan seeded
+with `remainingSlots = 0` is legitimately sold out from boot.
 
 ### 4.2 Unchecked exception escape paths
-Every path by which `PaymentFailedException` could bypass handling.
+
+`PaymentFailedException extends RuntimeException`, so the compiler enforces
+nothing (`codebase-context.md` constraint 1). Every escape route, audited:
+
+| Path | Outcome | Verdict |
+|---|---|---|
+| Thrown by `charge` in step 6 | Caught by the service unwind, rethrown, mapped by §3.6 | ✅ closed |
+| A *new* payment subtype added later | Caught only if the service catches `RuntimeException`, not the payment type | ✅ closed by §4.9's single catch |
+| Gateway throws something else (NPE from a buggy impl, wrapped timeout) | Unwind still runs; not in the §3.6 table → `500 internal_error` | ✅ correct — an unexpected throwable is our bug, not an outage |
+| **The unwind itself throws** | Original exception lost; inventory partly unreleased; client gets a misleading `500` | ⚠️ **F-1 — not yet closed** |
+| Response serialisation fails after `201` is committed | Status already sent; advice cannot help | ⚠️ accepted, negligible with records and fixed DTOs |
+| `Error` (OOM, etc.) | Not caught | ✅ correct, nothing useful to do |
+
+**F-1 — the unwind must not be able to throw.** §1.4.2 says "unwind claims in
+reverse, rethrow", which as written has a hole: if `release()` fails on the first
+claim, later claims leak *and* the original cause disappears. Required shape:
+
+```java
+catch (RuntimeException original) {
+    for (Runnable release : reversed(claims)) {
+        try { release.run(); }
+        catch (RuntimeException cleanupFailure) {
+            original.addSuppressed(cleanupFailure);   // keep the real cause
+            log.error("compensation failed", cleanupFailure);
+        }
+    }
+    throw original;
+}
+```
+
+Every release is attempted, failures are suppressed onto the original rather
+than replacing it, and the client still receives the accurate error.
 
 ### 4.3 Partial-failure windows
-Enumerated against the §1.4 ordering: what is observable if the process dies at
-each step, and which windows are accepted versus closed.
+
+Enumerated against §1.4.2's eight steps. The framing that matters:
+
+> **The payment gateway is the only durable thing in this system.** Storage is
+> in-memory, so a crash erases our records — but not the charge. Every window
+> after step 6 is therefore not merely "lost state" but "money taken, with no
+> record that it was, and no record left to reconcile from."
+
+| Dies after | Inventory | Claim | Purchase | Money | Observable |
+|---|---|---|---|---|---|
+| 1–3 | untouched | untouched | none | none | nothing happened |
+| 4 (claim taken) | untouched | **held** | none | none | in-process: leaked claim (W-3). On crash: erased with everything |
+| 5 (slot reserved) | **held** | held | none | none | same — W-3 |
+| 6 (charged) | held | held | none | **taken** | **W-2. Unrecoverable** |
+| 7 (saved) | decremented | held | exists | taken | consistent — the intended end state |
+
+W-1 (the transient dip) is not a crash window but a *concurrency* window: while
+step 6 is in flight, another caller's `GET /v1/plans` sees the reserved slot
+missing. Accepted in §1.4.6; the end state is what AC-8 constrains.
+
+Rows 4 and 5 differ in-process (a live leaked claim) from on-crash (nothing
+survives). W-3's mitigation — reservation TTLs — matters only for the in-process
+case, and is out of scope.
 
 ### 4.4 Concurrent same-member unlimited
-NFR-3 concretely: what two racing threads each see, and where they serialise.
+
+`putIfAbsent` returns `null` to exactly one thread. The loser never reaches the
+gateway, so no money moves on the rejected path.
+
+| Scenario | Contend? | Result |
+|---|---|---|
+| Same member, same unlimited plan, ×2 | **yes** | one `201`, one `409 unlimited_membership_exists` |
+| Same member, **two different** unlimited plans | **yes** | one succeeds — correct, see below |
+| Different members, same plan | no | both `201`; different keys never collide |
+| Same member, unlimited + pack | no | both `201`; packs never touch the claim store (D-5) |
+| Same member, two packs | no | both `201` |
+
+**The claim is keyed on the member alone, not on `(member, planId)`.** This is
+load-bearing. FR-5(d) says "at most one active *unlimited* membership", not one
+per plan. Keyed by `(member, planId)`, a member could hold Monthly Unlimited and
+Legacy Plan simultaneously, satisfying both keys while violating the rule. The
+key *is* the requirement.
+
+**Accepted transient false rejection.** The loser is told
+`unlimited_membership_exists` while the winner's charge is still in flight. If
+that charge fails, the winner's claim is released and nobody holds an unlimited
+membership — so the loser was rejected on a membership that never existed. A
+retry succeeds. This is W-1's logic applied to claims, and the trade is the
+same: a transient false "no" is recoverable, a double-sold entitlement is not.
 
 ### 4.5 Validation ordering
-Why PRD FR-3's eight steps run in that order, and what a client sees when more
-than one would fail.
+
+Why PRD FR-3's order is the order:
+
+| Before | After | Because |
+|---|---|---|
+| Shape | Semantics | Cannot test "blank after trim" on a field that is absent |
+| Resolution (404) | Plan state (409) | Cannot call a plan "inactive" when it does not exist |
+| Member state | Inventory | Avoids reserving a slot the next check would immediately release — a spurious W-1 dip |
+| Everything | Payment | Never call the gateway for a request we were going to reject |
+
+**Honesty about the third row:** in the seeded data every unlimited plan has
+`remainingSlots = null`, so no plan is subject to both checks. That ordering is
+defensive, not currently exercised — worth saying rather than claiming a benefit
+no seeded plan can demonstrate.
+
+**F-2 — batched field errors and `start_date_in_past` were never reconciled.**
+§3.5 gives validation failures an `errors` array under code `validation_failed`,
+while PRD AC-11 gives past dates their own code `start_date_in_past`. Those two
+cannot both describe one response. The rule:
+
+- **Step 1, shape** — collect **all** field failures, respond
+  `400 validation_failed` with `errors` populated. A client fixing a malformed
+  body should see every problem at once.
+- **Step 2, semantics** — ordered checks, **fail fast** with the specific code:
+  `start_date_in_past`, or `validation_failed` for a blank name. No `errors`
+  array.
+
+Cost: a request with both a blank name and a past date needs two round trips.
+Accepted — there are exactly two semantic checks, and the specific code is worth
+more to a client than batching two rare cases.
 
 ### 4.6 Cancel and inventory restore (Tier 2)
-Restore semantics, double-cancel, and whether cancelling frees the one-unlimited
-slot (PRD Q-2).
+
+| Case | Behaviour |
+|---|---|
+| Cancel `ACTIVE` purchase, finite-inventory plan | status → `CANCELLED`, slot restored |
+| Cancel `ACTIVE` purchase, unlimited-inventory plan | status → `CANCELLED`, nothing to restore |
+| Cancel an `ACTIVE` **unlimited** membership | claim released via `release(key, purchaseId)`; D-9 frees the member |
+| Cancel an already-`CANCELLED` purchase | rejected — see F-4 |
+| Cancel an unknown id | `404 purchase_not_found` |
+
+**F-3 — concurrent double-cancel over-credits inventory, and §2.5 cannot prevent
+it.** Two simultaneous cancels of the same purchase both read `status = ACTIVE`,
+both pass the guard, and both restore a slot — leaving a 5-slot pack with 6. This
+is the *mirror* of NFR-1's race, on the very path built to undo it, and
+`PurchaseStore` as specified in §2.5 has only `save` and `findById`, so
+read-then-write is all it can express.
+
+The status transition and the restore must be one atomic decision:
+
+```java
+// §2.5 gains:
+boolean compareAndSetStatus(UUID id, PurchaseStatus expected, PurchaseStatus next);
+```
+
+Only the thread that wins the CAS restores inventory and releases the claim.
+Maps to `ConcurrentHashMap.replace(key, oldValue, newValue)` in memory, and to
+`UPDATE purchases SET status='CANCELLED' WHERE id=? AND status='ACTIVE'` with
+rows-affected = 1 in SQL — the same shape as every other claim in §1.4.7.
+
+**F-4 — a second cancel needs a code PRD AC-10 does not have.** Losing the CAS
+means already cancelled. Options were a silent idempotent `200` or an explicit
+conflict; the call is `409 purchase_already_cancelled`, because a client
+cancelling twice has a bug and hiding it helps nobody. Needs a PRD amendment,
+and only if Tier 2 is reached.
 
 ### 4.7 Retry and double-charge (Tier 3)
-Why the port's missing idempotency parameter pushes dedupe into the service, and
-how that second race interacts with §1.4.
+
+`charge(int, String)` carries no idempotency key, so deduplication lives in the
+service as a third claim: `ConcurrentHashMap<String, UUID>` from
+`Idempotency-Key` to purchase id, claimed by `putIfAbsent` **before** step 6.
+
+That it slots into §1.4.2's compensation stack as simply a third `push` is a
+genuine validation of that design — the pattern scaled without changing shape.
+
+**But the stack's uniform "release everything on failure" rule breaks here, and
+this is why Tier 3 is ranked last.** The dedupe key must be released if we fail
+*before* charging, and must **not** be released if we fail *after* charging —
+releasing it would let a retry charge the card a second time, the exact harm the
+feature exists to prevent. So the stack needs two kinds of entry:
+
+| Claim | Release on pre-charge failure | Release on post-charge failure |
+|---|---|---|
+| Inventory slot | yes | yes |
+| Unlimited claim | yes | yes |
+| **Idempotency key** | yes | **no** |
+
+A uniform stack cannot express that. Tier 3 therefore *changes* §1.4.2's
+compensation model rather than extending it — a structural change at the end of
+the timebox, on the code path that handles money. Confirmed as last, gated on
+Tier 2 green with ≥1h remaining.
 
 ### 4.8 The `start_date` today boundary (Q-1)
-Yesterday rejected, today accepted — the off-by-one, and what "today" means when
-the request crosses midnight mid-flight (PRD AS-8).
+
+| `start_date` | Result |
+|---|---|
+| yesterday | `400 start_date_in_past` |
+| **today** | `201` — today is valid; the check is *strictly* before |
+| tomorrow | `201` |
+| far future (2099) | `201` — no upper bound (AS-5) |
+| malformed (`2026-13-01`, `not-a-date`) | `400 validation_failed` — step 1, not step 2 |
+
+**The clock is read once per request**, not once per check. Two reads could
+straddle midnight and disagree with each other, making a single request
+internally inconsistent — a bug that would reproduce roughly once a day.
+
+**Midnight crossing is accepted.** A request arriving at `23:59:59.9` and
+validated at `00:00:00.1` has a `start_date` of the former "today" rejected as
+past. Transient, rare, recoverable by retry, and inherent to AS-8's
+server-timezone definition of "today".
 
 ### 4.9 Cleanup parity across both payment failure modes (Q-3)
-Splitting one failure path into two is exactly when the second path silently
-loses the no-purchase/no-inventory-change guarantee. How both branches are made
-to share one cleanup path rather than two that must be kept in step.
+
+Before Q-3 there was one payment failure path carrying the no-purchase,
+no-inventory-change guarantee. There are now two, and **the second is where that
+guarantee gets silently dropped — because the first one's test still passes.**
+
+The structural answer is that there is still only one cleanup path. The service
+catches `RuntimeException`, not a payment type:
+
+```java
+catch (RuntimeException original) { unwind(claims, original); throw original; }
+```
+
+This is deliberate, for a reason §1.7 has not yet decided. If §1.7 makes the two
+payment types **siblings** rather than both subtypes of `PaymentFailedException`,
+then `catch (PaymentFailedException ...)` would miss one entirely — a `502` that
+silently keeps a promo slot. Catching `RuntimeException` is correct under *either*
+§1.7 outcome, which is why §4.2's audit chose it.
+
+**The requirement §1.7 inherits:** whatever it produces must give §3.6 two
+distinct classes to key its table on, and must not require the service to
+enumerate payment types in order to clean up correctly.
+
+**T-2 and T-10 assert identical post-state** — not merely "an error was
+returned". Same purchase-absent assertion, same inventory-unchanged assertion,
+differing only in status and `code`. Written as one parameterised test over the
+two failure modes, so a future third mode cannot be added without a cleanup
+assertion arriving with it.
 
 ---
 
@@ -796,7 +1018,34 @@ answers evaluation criterion #4 directly.
 ## 6. Risks and Deferred Items
 
 Carried from PRD §13 and `STATE.md`, plus anything surfaced while expanding the
-sections above.
+sections above. Closed last.
+
+### Findings from the §4 audit
+
+**Two of these amend sections that are already approved, so they are pending
+approval rather than applied.**
+
+| # | Finding | Touches | Status |
+|---|---|---|---|
+| **F-1** | The compensation unwind can itself throw, losing the original cause and leaking later claims. Needs per-release `try`/`catch` with `addSuppressed` | **§1.4.2 (approved)** | ⏸ amendment pending |
+| **F-2** | §3.5's batched `errors` array and AC-11's `start_date_in_past` code cannot both describe one response. Resolved: batch shape errors, fail fast on semantics | §3.5, §4.5, PRD AC-11 | ✅ resolved in §4.5 |
+| **F-3** | Concurrent double-cancel over-credits inventory. `PurchaseStore` needs `compareAndSetStatus` — read-then-write cannot express it | **§2.5 (approved)** | ⏸ amendment pending, Tier 2 only |
+| **F-4** | A second cancel needs `409 purchase_already_cancelled`, a code PRD AC-10 lacks | PRD AC-10 | ⏸ PRD amendment, Tier 2 only |
+
+F-1 is the only one affecting committed Tier 0/1 scope. F-3 and F-4 are inert
+unless Tier 2 is reached, but are recorded now because discovering them at hour
+three would be worse.
+
+### Deferred by design
+
+| Item | Why deferred | Named in |
+|---|---|---|
+| W-2: charged-but-not-persisted | Uncloseable without an idempotency key, outbox, or reconciliation job | §1.4.6, §4.3 |
+| W-3: reservation leak on thread death | Needs reservation TTLs | §1.4.6, §4.3 |
+| Cross-instance correctness | In-process only; a second instance would oversell | PRD AS-4 |
+| Midnight-crossing date rejection | Inherent to a server-timezone "today" | §4.8, PRD AS-8 |
+| Response-serialisation failure after `201` | Status already committed | §4.2 |
+| Tier 3 compensation-model change | Idempotency keys break the uniform release rule | §4.7 |
 
 ---
 
@@ -819,8 +1068,8 @@ Expanding top-to-bottom would mean rewriting §1.1–1.3 once §1.4 settles.
 ```
 ==================================================
 CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2
-LAST APPROVED: §2 data models
-NEXT STEP: Review §3 (API contracts). Then §1.1-1.3 / §1.5-1.8 remain owed
-           -- §1.7 in particular, which §3.6's two payment rows depend on.
+LAST APPROVED: §3 API contracts
+NEXT STEP: Review §4 (edge cases) AND decide on F-1/F-3 amendments to the
+           approved §1.4.2 and §2.5. Then §1.1-1.3, §1.5-1.8, §5 remain.
 ==================================================
 ```

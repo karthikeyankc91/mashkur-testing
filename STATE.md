@@ -6,10 +6,10 @@ Update it in the same turn that an artifact is approved and persisted.
 ```
 ==================================================
 CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2
-LAST APPROVED: TRD §2 data models
-NEXT STEP: Review TRD §3 (API contracts). Still owed: §1.1-1.3, §1.5-1.8,
-           §4, §5, §6 -- §1.7 especially, since §3.6's two payment rows
-           depend on it producing two distinct exception types.
+LAST APPROVED: TRD §3 API contracts
+NEXT STEP: Review TRD §4 (edge cases) and decide F-1/F-3, which amend the
+           already-approved §1.4.2 and §2.5. Still owed: §1.1-1.3,
+           §1.5-1.8, §5.
 ==================================================
 ```
 
@@ -29,7 +29,17 @@ NEXT STEP: Review TRD §3 (API contracts). Still owed: §1.1-1.3, §1.5-1.8,
 | 2026-10-30 | 2 | `docs/02-trd/TRD.md` skeleton + expansion order | **Approved** |
 | 2026-10-30 | 2 | TRD §1.4 concurrency and atomicity | **Approved** |
 | 2026-10-30 | 2 | TRD §2 data models | **Approved** |
-| 2026-10-30 | 2 | TRD §3 API contracts | Draft — awaiting review |
+| 2026-10-30 | 2 | TRD §3 API contracts | **Approved** |
+| 2026-10-30 | 2 | TRD §4 edge cases + §6 findings | Draft — awaiting review |
+
+### Open findings from the §4 audit
+
+| # | Amends | Scope | Status |
+|---|---|---|---|
+| F-1 | §1.4.2 (approved) — unwind must not throw; `addSuppressed` | **Tier 0/1** | Pending approval |
+| F-2 | §3.5 / AC-11 reconciliation | Tier 0/1 | Resolved in §4.5 |
+| F-3 | §2.5 (approved) — `PurchaseStore.compareAndSetStatus` | Tier 2 only | Pending approval |
+| F-4 | PRD AC-10 — `409 purchase_already_cancelled` | Tier 2 only | Pending PRD amendment |
 
 ## Locked decisions
 
