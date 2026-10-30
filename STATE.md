@@ -6,10 +6,10 @@ Update it in the same turn that an artifact is approved and persisted.
 ```
 ==================================================
 CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2
-LAST APPROVED: TRD §4 edge cases; findings F-1/F-3/F-4 applied
-NEXT STEP: Review TRD §5 (test strategy) and new finding F-5. Only
-           §1.1-1.3 and §1.5-1.8 then remain -- §1.7 is owed to §3.6
-           and §4.9, which both depend on it.
+LAST APPROVED: TRD §5 test strategy; finding F-5 applied
+NEXT STEP: Review TRD §1.1-1.3 and §1.5-1.8 -- the last unexpanded
+           sections. On approval, Phase 2.2 is complete and Phase 2.3
+           (multi-pass review of the whole TRD) begins.
 ==================================================
 ```
 
@@ -31,7 +31,8 @@ NEXT STEP: Review TRD §5 (test strategy) and new finding F-5. Only
 | 2026-10-30 | 2 | TRD §2 data models | **Approved** |
 | 2026-10-30 | 2 | TRD §3 API contracts | **Approved** |
 | 2026-10-30 | 2 | TRD §4 edge cases + §6 findings | **Approved** |
-| 2026-10-30 | 2 | TRD §5 test strategy | Draft — awaiting review |
+| 2026-10-30 | 2 | TRD §5 test strategy | **Approved** |
+| 2026-10-30 | 2 | TRD §1.7 + §1.1-1.3 + §1.5, §1.6, §1.8 | Draft — awaiting review |
 
 ### Findings log
 

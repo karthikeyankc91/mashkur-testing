@@ -1,14 +1,15 @@
 # TRD — Glofox Memberships Purchase API
 
-> **STATUS: Phase 2.2 in progress.** Skeleton approved. §1.4, §2, §3, §4
-> approved; F-1/F-3/F-4 applied. **§5 expanded — awaiting review.**
-> Still unexpanded: **§1.1–1.3, §1.5–1.8** only.
+> **STATUS: Phase 2.2 complete — every section expanded.** §1.4, §2, §3, §4, §5
+> approved; F-1 through F-5 applied. **§1.1–1.3 and §1.5–1.8 expanded, awaiting
+> review.**
 >
 > Expansion ran out of the proposed order at the author's direction: §3, §4 and
-> §5 were pulled ahead of the remaining architecture sub-sections.
+> §5 were pulled ahead of the remaining architecture sub-sections, and §1.7 was
+> taken before §1.1–1.3 to discharge what §3.6 and §4.9 had promised.
 >
-> ⚠️ **§5 found a sixth issue, F-5** — PRD T-1's assertions were satisfiable by a
-> wrong implementation. Applied to PRD T-1; see §6.
+> **Next after review: Phase 2.3** — the multi-pass review loop over the whole
+> document, which is where cross-section contradictions get caught.
 
 **Upstream:** [`docs/01-prd/PRD.md`](../01-prd/PRD.md) (approved `f54450b`, amended
 `6e74e3a` — Q-1/Q-2/Q-3 resolved) ·
@@ -22,17 +23,145 @@
 ## 1. Architecture
 
 ### 1.1 Layering and package layout
-Resolves README open decision #2. What packages exist, what each owns, and what
-each is forbidden from importing.
+
+Resolves README open decision #2. Layered rather than feature-sliced: the repo
+already hints at `payment/` and `storage/memory/`, and with one aggregate there
+is no second feature to slice away from.
+
+```
+com.glofox.memberships
+├── MembershipsApplication              vendor, untouched
+├── config/
+│   ├── SeedData                        vendor, untouched
+│   ├── SeedingConfig                   new — seed → stores (§1.8)
+│   └── ClockConfig                     new — the one Clock bean (§1.6)
+├── payment/
+│   ├── PaymentGateway                  vendor + 2 nested subtypes (§1.7)
+│   └── AlwaysSucceedingPaymentGateway  vendor, untouched
+├── domain/                             java.* only
+│   ├── Plan · PlanType · PlanSnapshot
+│   ├── Purchase · PurchaseStatus
+│   └── MemberKey
+├── store/                              ports — interfaces only (§2.5)
+│   ├── PlanCatalogue · InventoryStore
+│   └── UnlimitedClaimStore · PurchaseStore
+├── storage/memory/                     adapters — the repo's suggested home
+│   └── InMemory{PlanCatalogue,InventoryStore,UnlimitedClaimStore,PurchaseStore}
+├── service/
+│   ├── PurchaseService                 the eight steps + compensation (§1.4.2)
+│   ├── StartDatePolicy                 holds the Clock (§1.6)
+│   └── PlanNotFound… · PlanInactive… · PlanSoldOut… (HTTP-free exceptions)
+└── web/
+    ├── PlanController · PurchaseController
+    ├── dto/                            request/response records (§3.1)
+    ├── PurchaseAssembler · PlanAssembler   domain → DTO
+    └── ApiExceptionHandler             the one mapping table (§3.6)
+```
+
+**The forbidden-import table is the actual content of this section.** A layout
+without it is a diagram; with it, it is a constraint.
+
+| Package | May import | Must never import |
+|---|---|---|
+| `domain` | `java.*` **only** | Spring, Jackson, `jakarta.*`, `store`, `service`, `web` |
+| `store` | `domain` | Spring, `web`, `storage.memory` |
+| `storage.memory` | `domain`, `store`, `java.util.concurrent` | `web`, `service`, Jackson |
+| `service` | `domain`, `store`, `payment` | `web`, Jackson, `storage.memory` (the concrete classes) |
+| `web` | `domain`, `store`, `service`, Spring, Jackson | `storage.memory` |
+| `config` | everything — it is the assembler | — |
+
+`web` is permitted to import `store` because `GET /v1/plans` reads the catalogue
+and inventory directly (see below). `service` may import the concrete adapters'
+*package* never — only the ports.
+
+**No `PlanService`, deliberately.** `GET /v1/plans` is
+`catalogue.listInSeedOrder()` composed with `inventory.remaining(id)`. There is
+no rule to enforce, and NFR-6 puts rules in the service — so a service here would
+be a layer with no content, which NFR-8 argues against. The controller asks the
+two ports and hands the result to `PlanAssembler`. *Alternative considered:* a
+thin `PlanQueryService` for a uniform controller dependency shape and a home if
+a rule later appears. Rejected as ceremony today; it is a two-minute change if
+a rule arrives.
 
 ### 1.2 Dependency direction and the port boundary
-How NFR-4 (swappable storage) is enforced rather than merely intended — which
-direction dependencies point, and what keeps Spring and web types out of the
-domain.
+
+**Every arrow points inward. `domain` is the only package that imports nothing.**
+
+```
+config ──▶ web ──▶ service ──▶ store (ports) ◀── storage.memory
+                      │            │
+                      └──▶ payment │
+                                   ▼
+                                domain  ◀── everything
+```
+
+Note the direction reversal at `store`: `service` depends on the **port**, and
+the adapter depends on the port too. The service never knows an implementation
+exists. That is the whole of NFR-4 — swapping `InMemoryInventoryStore` for
+`JdbcInventoryStore` changes one `@Bean` method in `SeedingConfig` and nothing
+else compiles differently.
+
+**The skeleton already demonstrates the pattern, which is worth noticing rather
+than inventing.** `payment/PaymentGateway` is a port with
+`AlwaysSucceedingPaymentGateway` as its adapter. `store/` + `storage/memory/` is
+the same shape applied to persistence. Copying the structure the repo hands you
+is a better answer than importing a hexagonal-architecture vocabulary it never
+asked for.
+
+**How it is enforced — honestly, three partial mechanisms rather than one
+guarantee:**
+
+1. **Package structure plus the §1.1 table** — reviewable, not enforced.
+2. **ArchUnit would enforce it**, and is not added: a test-only dependency to
+   police six rules in a codebase this size fails the same cost test as §1.5's
+   validation starter. Named so the omission is a choice.
+3. **The test suite enforces it incidentally, and this is the real guard.**
+   §5.1 runs service and domain tests as plain JUnit with *no Spring context*.
+   If a Spring or Jackson type leaked into `domain` or `service`, those tests
+   would need a context to run. The fast tests stay fast only while the boundary
+   holds — so the suite's speed is a boundary alarm.
 
 ### 1.3 Where the business rules live
-NFR-6 and evaluation criterion #2. Why rules sit in the service and not the
-controller or the store, and what the handler is left holding.
+
+NFR-6 and evaluation criterion #2 — "where the rules live, handler vs service vs
+storage, and why". The three-way split, in one sentence each:
+
+> **Domain objects answer questions. The service makes decisions. Stores make
+> guarantees.**
+
+| Layer | Holds | Example | Explicitly does **not** hold |
+|---|---|---|---|
+| `domain` | facts and invariants about one object | `plan.isActive()`; `MemberKey` normalises on construction | any decision about what to do with a fact |
+| `service` | all six FR-5 rules, the eight-step order, the compensation stack | "inactive → throw"; "claim then reserve then charge" | storage mechanics, HTTP status |
+| `store` | atomicity and representation | `tryReserve` is atomic; absent entry means unlimited | plan types, member identity, payment |
+| `web` | shape validation, DTO mapping, status translation | `errors` array; the §3.6 table | any rule — it could be deleted and replaced by a CLI without moving a rule |
+
+**The judgment call worth defending:** `Plan.isActive()` lives in the domain but
+*"an inactive plan cannot be purchased"* lives in the service. The data and the
+decision are deliberately separated. Putting the rejection on `Plan` —
+`plan.requirePurchasable()` — is a legitimate rich-domain-model choice, and it
+would scatter FR-5 across the domain and the service so that no single file
+answers "what are the purchase rules?". With all six in `PurchaseService`, the
+answer is one method.
+
+**Why not the controller.** Rules there cannot be reached by any other entry
+point, and the rule would be expressed in HTTP vocabulary — `409` instead of
+"this member already holds one". The brief's stretch list includes a second
+mutating endpoint (cancel) that needs the same unlimited-claim rule; a rule in
+the purchase controller would have to be duplicated or lifted.
+
+**Why not the store.** To decide "a member may hold at most one active
+unlimited", a store would need to know about plan types and member identity, and
+to reject inactive plans it would need the catalogue. It would become the
+service with a worse name. What the store legitimately owns is narrower and
+genuinely belongs to it: *that* `tryReserve` is atomic, and *that* an absent
+entry means unlimited. The service asks "may I have a slot?" and never learns
+how the answer was made safe.
+
+**The test that proves the split holds:** every rule test in §5.5
+(`PurchaseServiceRulesTest`) runs with no web layer and no Spring context. A rule
+that had leaked into a controller could not be tested there — the test would need
+`@WebMvcTest`, and the leak would announce itself.
 
 ### 1.4 Concurrency model and the atomicity boundary ⭐
 
@@ -233,25 +362,211 @@ concrete content of "no in-memory assumption leaks into the service."
 - No test needs a clock. §1.6 keeps it that way.
 
 ### 1.5 Validation strategy
-Hand-roll, or add `spring-boot-starter-validation` to a deliberately three-dependency
-build? Weighed against "clarity over frameworks for their own sake."
+
+**Hand-rolled. `spring-boot-starter-validation` is not added.**
+
+Three reasons, in order of weight:
+
+1. **F-2's rule does not map onto bean validation.** Shape errors batch under
+   `validation_failed`; semantic errors fail fast with a *specific* code
+   (`start_date_in_past`). Getting a distinct top-level code out of an
+   `@AssertTrue` means unpacking `MethodArgumentNotValidException`, mapping
+   constraint names to codes, and special-casing one constraint out of the
+   batch — more glue than the validation it replaces.
+2. **Weight.** The starter drags in `hibernate-validator` and `jakarta.el` to
+   validate three fields, into a build deliberately kept at three dependencies.
+3. **The brief's stated preference:** "prefer clarity over frameworks for their
+   own sake."
+
+**Where each check lives — and F-2's split falls out of the layering rather than
+being imposed on it:**
+
+| Check | Layer | Why there |
+|---|---|---|
+| Body parses; `plan_id` is a UUID; `start_date` is an ISO date | Jackson binding, web | The framework already does this; its failures are mapped in §3.6 |
+| `member_name` present | `PurchaseRequestValidator`, web | Shape. Collected into a list, so **all** field errors return at once |
+| `member_name` non-blank after trim | service | A rule, and NFR-6 puts rules in the service |
+| `start_date` not before today | `StartDatePolicy`, service side | A rule, and it needs the clock (§1.6) |
+
+Shape errors are *collected* because the web layer can see all three fields at
+once. Semantic errors are *thrown* because the service evaluates them in order
+and the first failure ends the request. That is not a compromise between
+batching and failing fast — it is the two layers behaving according to what each
+can see.
+
+**Blank names are rejected explicitly, not via `MemberKey`.** §2.4's compact
+constructor would throw `IllegalArgumentException`, which maps to a generic
+`500`. The service checks first and throws a domain exception, so the client gets
+`400 validation_failed`. `MemberKey`'s own check stays as an invariant backstop.
 
 ### 1.6 The clock boundary (Q-1)
-AC-11 needs "today"; NFR-5 forbids business rules from reading a clock. How the
-`Clock` is injected and reachable from validation **only**, enforced structurally
-rather than by convention — so the domain cannot acquire a time dependency by
-accident and leave T-1/T-3 time-sensitive.
+
+AC-11 needs "today"; NFR-5 forbids business rules from reading a clock. The
+boundary is made **structural by placement**: exactly one class holds a `Clock`.
+
+```java
+@Configuration
+class ClockConfig {
+    @Bean Clock clock() { return Clock.systemDefaultZone(); }   // AS-8: server zone
+}
+
+// The ONLY class in the system with a Clock field.
+record StartDatePolicy(Clock clock) {
+    void requireNotPast(LocalDate startDate) {
+        if (startDate.isBefore(LocalDate.now(clock))) {
+            throw new StartDateInPastException(startDate);
+        }
+    }
+}
+```
+
+`PurchaseService` depends on `StartDatePolicy`, **not** on `Clock`. So the
+service has no clock field, the domain has no clock field, and no business rule
+has one available to read even by accident. The enforcement is that
+`grep -rn "Clock" src/main` returns two files.
+
+**Why a collaborator rather than a `Clock` field on the service.** A `Clock` on
+`PurchaseService` would be *reachable* from every rule in it. The rule "validation
+may read the clock, rules may not" would then be a convention that one careless
+expiry check defeats — and §5.4 shows the cost: every concurrency test becomes
+time-sensitive. Moving the clock one class away makes the convention unnecessary.
+
+Tests construct `new StartDatePolicy(Clock.fixed(instant, zone))` directly. Six
+of seven service tests never mention a clock (§5.4).
 
 ### 1.7 Payment port extension (Q-3)
-AC-8a/8b require distinguishing a decline from an outage, which the port as
-shipped cannot express. Subtype of `PaymentFailedException`, a sibling exception,
-or a result type? Constraint: `AlwaysSucceedingPaymentGateway` must keep
-compiling untouched, and the change must read as a deliberate extension of
-vendor code rather than an edit to it.
+
+**Two nested subclasses of `PaymentFailedException`, added to the port. Nothing
+existing is changed.**
+
+```java
+public interface PaymentGateway {
+
+    PaymentResult charge(int amountCents, String memberName);
+
+    record PaymentResult(String transactionId) { }
+
+    class PaymentFailedException extends RuntimeException {        // unchanged
+        public PaymentFailedException(String message) { super(message); }
+    }
+
+    // --- added ---
+
+    /** A working gateway refused the charge. Not retryable as-is. */
+    class PaymentDeclinedException extends PaymentFailedException {
+        public PaymentDeclinedException(String message) { super(message); }
+    }
+
+    /** The gateway never reached a decision. Retryable. */
+    class PaymentGatewayUnavailableException extends PaymentFailedException {
+        public PaymentGatewayUnavailableException(String message) { super(message); }
+    }
+}
+```
+
+**Why subtypes of the existing exception rather than siblings:**
+
+| | Subtypes (chosen) | Siblings |
+|---|---|---|
+| The README's instruction — "provide an implementation that throws `PaymentGateway.PaymentFailedException`" | still works | still works, but the type is now orphaned |
+| `catch (PaymentFailedException)` | catches both | **misses both** |
+| An adapter that only knows "it failed" | throws the base type | has no honest option |
+| Vendor file diff | two classes added, nothing modified | untouched, but the concept splits across two packages |
+
+The umbrella type surviving is the point. It gives a gateway that genuinely
+cannot tell the two apart something correct to throw, and it means §4.9's safety
+net holds even if someone later narrows the catch.
+
+**§3.6's table gains a fallback row:** `PaymentFailedException` itself →
+`402 payment_declined`. An undifferentiated failure is reported as a decline
+rather than an outage, because telling a client to retry a gateway that actually
+refused the card produces a retry loop that fails every time, whereas prompting
+for another card after a transient outage merely wastes one attempt. The
+conservative direction is the one that does not encourage retries.
+
+**Rejected: a sealed result type.**
+
+```java
+sealed interface ChargeOutcome permits Charged, Declined, Unavailable { }
+```
+
+This is what I would choose on a greenfield port — exhaustive `switch`, no
+exceptions for control flow, and Java 21 makes it pleasant. It is rejected for
+one concrete reason: **it changes `charge`'s return type**, which breaks
+`AlwaysSucceedingPaymentGateway` and contradicts the README's own instruction
+about how to simulate failure in tests. Redesigning the contract the brief
+depends on, to win elegance, is the wrong trade in a three-hour exercise. Worth
+raising in the follow-up as "what I would do if I owned this port."
+
+**Honest limitation.** As shipped, *nothing in production code throws either new
+type* — the only bean always succeeds. The distinction is a contract and a
+test-visible behaviour (T-2, T-10), and a real adapter would map HTTP `402` onto
+`PaymentDeclinedException` and timeouts, connection failures and `5xx` onto
+`PaymentGatewayUnavailableException`. Stating that is better than implying the
+split is exercised at runtime. A profile-gated flaky gateway for manual testing
+was considered and left out as scope.
 
 ### 1.8 Startup seeding and bean wiring
-How FR-1's "before traffic is served" is guaranteed, and where the
-`PlanSeed → domain` mapping lives.
+
+FR-1 requires the catalogue populated **before traffic is served**. The strongest
+form of that guarantee is not to seed a store but to **construct it already
+seeded** — then no unseeded state exists to observe.
+
+```java
+@Configuration
+class SeedingConfig {
+
+    @Bean PlanCatalogue planCatalogue() {
+        return new InMemoryPlanCatalogue(SeedData.PLANS.stream().map(this::toPlan).toList());
+    }
+
+    @Bean InventoryStore inventoryStore() {
+        return new InMemoryInventoryStore(
+            SeedData.PLANS.stream()
+                .filter(s -> s.remainingSlots() != null)        // §2.3: absent == unlimited
+                .collect(toMap(PlanSeed::id, PlanSeed::remainingSlots)));
+    }
+}
+```
+
+**Why not the alternatives:**
+
+| Mechanism | Problem |
+|---|---|
+| `@EventListener(ApplicationReadyEvent)` | Fires **after** the connector is accepting traffic. A request can arrive before the catalogue exists |
+| `ApplicationRunner` / `CommandLineRunner` | Runs before ready, but still mutates a store that briefly existed empty |
+| `@PostConstruct` on the store | Works, but splits construction from population for no gain |
+| **Constructor injection of seed data** | No empty state ever exists. Chosen |
+
+**Seed failure kills the boot, for free.** §2.6's `parseType` throws on an
+unrecognised type. Inside a `@Bean` method that means the context fails to
+refresh and the application exits non-zero — exactly the required behaviour, with
+no explicit failure handling to write.
+
+**The vendor's `logSeededPlans()` on `ApplicationReadyEvent` stays untouched.**
+It only logs, so its late timing is harmless, and leaving it alone keeps the
+vendor diff limited to §1.7's two classes.
+
+**Mixed bean styles, justified:** `AlwaysSucceedingPaymentGateway` remains a
+scanned `@Component` (vendor, untouched); the stores are `@Bean` methods because
+`SeedingConfig` owns the seed mapping and the adapters take their data through
+the constructor. The rule is that anything needing seed data is a `@Bean` here;
+anything self-sufficient can be scanned.
+
+```
+SeedData ──▶ SeedingConfig ──▶ PlanCatalogue, InventoryStore
+                                UnlimitedClaimStore, PurchaseStore
+                                        │
+ClockConfig ──▶ StartDatePolicy ───┐    │
+                                   ▼    ▼
+AlwaysSucceedingPaymentGateway ──▶ PurchaseService
+                                        │
+                                        ▼
+                        PurchaseController, PlanController
+                                        │
+                                        ▼
+                               ApiExceptionHandler
+```
 
 ---
 
@@ -740,8 +1055,22 @@ private static final Map<Class<? extends Exception>, Problem> MAPPINGS = Map.of(
     PlanSoldOutException.class,               problem(CONFLICT,    "plan_sold_out"),
     StartDateInPastException.class,           problem(BAD_REQUEST, "start_date_in_past"),
     PaymentDeclinedException.class,           problem(PAYMENT_REQUIRED, "payment_declined"),
-    PaymentGatewayUnavailableException.class, problem(BAD_GATEWAY, "payment_gateway_error"));
+    PaymentGatewayUnavailableException.class, problem(BAD_GATEWAY, "payment_gateway_error"),
+    // §1.7 fallback: an adapter that cannot tell the two apart throws the base type.
+    PaymentFailedException.class,             problem(PAYMENT_REQUIRED, "payment_declined"));
 ```
+
+**The base-type fallback row reports an undifferentiated failure as a decline,
+not an outage.** Telling a client to retry a gateway that actually refused the
+card produces a loop that fails every time; prompting for another card after a
+transient outage wastes one attempt. The conservative direction is the one that
+does not encourage retries (§1.7).
+
+**Lookup is by exact class, not by `instanceof`.** With `PaymentDeclinedException`
+and `PaymentGatewayUnavailableException` both extending `PaymentFailedException`
+(§1.7), a hierarchy walk would need ordering rules to avoid the base row
+shadowing the subtypes. Exact-class lookup with an explicit base row is
+unambiguous and reads in the same order as PRD AC-10.
 
 One handler performs the lookup; anything absent falls through to `500`
 `internal_error` with the cause logged and no detail leaked to the client.
@@ -1273,9 +1602,9 @@ Expanding top-to-bottom would mean rewriting §1.1–1.3 once §1.4 settles.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2
-LAST APPROVED: §4 edge cases; F-1/F-3/F-4 applied
-NEXT STEP: Review §5 (test strategy) and F-5. Then only §1.1-1.3 and
-           §1.5-1.8 remain -- §1.7 owed to §3.6 and §4.9.
+CURRENT PHASE: Phase 2 [Technical Requirement Document] -> Sub-Phase 2.2 done
+LAST APPROVED: §5 test strategy; F-5 applied
+NEXT STEP: Review §1.1-1.3 and §1.5-1.8. On approval -> Phase 2.3, the
+           multi-pass review loop over the complete document.
 ==================================================
 ```
