@@ -5,14 +5,16 @@ Update it in the same turn that an artifact is approved and persisted.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 5 [Interview Drill & Dry-Run Readiness]
-LAST APPROVED: Phase 4 report; V-2/V-5/V-6/V-10 amendments applied
-NEXT STEP: Review docs/05-interview-drill/DRILL.md. All five phases are
-           then complete and the blueprint is ready to execute.
+CURRENT PHASE: ALL FIVE PHASES COMPLETE -- planning closed
+LAST APPROVED: Phase 5 drill; phases 4+5 merged to main (5d10145)
+NEXT STEP: EXECUTION, which has not started. No production code exists.
+           Begin at docs/03-implementation/step_01_domain_and_ports.md
+           (11 files, ~15 min). Needs an explicit instruction: the
+           operating contract bars writing codebase code until asked.
 ==================================================
 ```
 
-**Branch:** `phase/04-security` — merges to `main` on approval
+**Branch:** `main` — all planning merged. Execution should open `impl/step-01`.
 **Project:** Glofox Memberships Purchase API take-home (Java 21 / Spring Boot 4.0.0)
 
 ## Approval log
@@ -44,7 +46,7 @@ NEXT STEP: Review docs/05-interview-drill/DRILL.md. All five phases are
 | 2026-10-31 | 3 | `step_08_integration_and_submission.md` | **Approved** |
 | 2026-10-31 | 4 | `docs/04-security/VULNERABILITY-REPORT.md` | **Approved** |
 | 2026-10-31 | 4 | V-2/V-5/V-6/V-10 amendments to steps 05, 06, 08 | **Approved** |
-| 2026-10-31 | 5 | `docs/05-interview-drill/DRILL.md` | Draft — awaiting review |
+| 2026-10-31 | 5 | `docs/05-interview-drill/DRILL.md` | **Approved** — merged `5d10145` |
 
 ### Process defect — git history for phase 3
 
