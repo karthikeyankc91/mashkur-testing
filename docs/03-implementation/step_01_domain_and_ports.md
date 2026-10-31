@@ -252,6 +252,52 @@ from here:
   `Map` of `AtomicInteger`, not a `ConcurrentHashMap`. The claim store is the
   opposite case and does need one (TRD §2.2).
 
+## 7. Deviations found during execution
+
+### DV-2 — `strip()` is not sufficient; the NBSP example in §4.6 was wrong
+
+**§4.6 claimed:** "a name pasted with a non-breaking space normalises under
+`strip()` and silently does not under `trim()`."
+
+**That is false, and the test caught it.** `String.strip()` removes characters
+accepted by `Character.isWhitespace(char)`, and Java deliberately excludes
+non-breaking spaces from that predicate because they are not line-break
+opportunities. So `Character.isWhitespace('\u00A0')` is `false` and `strip()`
+leaves a trailing NBSP exactly where `trim()` does.
+
+Two Unicode space predicates exist and they disagree:
+
+| Character | `isWhitespace` | `isSpaceChar` | `trim()` | `strip()` |
+|---|---|---|---|---|
+| `U+0020` space | yes | yes | removes | removes |
+| `\t` `\n` | yes | **no** | removes | removes |
+| `U+2003` em space | yes | yes | leaves | removes |
+| `U+00A0` no-break space | **no** | yes | leaves | **leaves** |
+
+**Why this is a correctness bug and not a nitpick:** `"Alice"` and
+`"Alice\u00A0"` would be different `MemberKey`s, so one member could hold two
+active unlimited memberships by appending an invisible character. That defeats
+PRD FR-5(d) — a core business rule — through the request body, with no server
+misconfiguration needed. It is the same class of bypass as the Turkish-locale
+`toLowerCase()` problem that §4.6 got right.
+
+**Fix applied:** `MemberKey` trims with a private `isSpace(char)` accepting
+`Character.isWhitespace(c) || Character.isSpaceChar(c)`, so both families are
+removed from the leading and trailing edges. `MemberKeyTest` asserts the NBSP,
+em-space and mixed cases, and the blank-rejection parameterisation now includes
+`U+00A0` and `U+2003`.
+
+**Deliberately still out of scope**, and recorded as a known gap alongside
+security finding V-1: interior spacing (`"Al  ice"`), zero-width characters
+(`U+200B`), and homoglyph confusables (`"\u0410lice"` with a Cyrillic A).
+Closing those needs a real member registry rather than a display name used as
+an identity, which is the actual design flaw underneath V-1.
+
+**Lesson for the remaining steps:** the step files were written without
+compiling anything. This one was wrong in a way that only a test could reveal,
+which is an argument for the step-07 mutation-testing discipline rather than
+against the plan.
+
 ```
 ==================================================
 CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 01

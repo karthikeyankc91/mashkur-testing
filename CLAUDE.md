@@ -12,14 +12,41 @@ end with the Current State Anchor block.
 
 ## What this repository is
 
-A **planning and architecture workspace**, not an application. It holds no build
-system, no dependencies, and no test suite — there is nothing to build, lint, or
-run. All content is Markdown: `context/` is human-authored input, `docs/` is
-agent-authored output produced one phase at a time.
+Both the planning workspace **and** the application it plans. The Glofox
+take-home skeleton is vendored here, so there is real code to build and run.
 
-The target codebase being designed for lives elsewhere; it is described in
-`context/codebase-context.md`. Do not scaffold, install, or generate application
-code in this repository.
+| Path | Owner | Notes |
+|---|---|---|
+| `context/` | human | Input: brief, constraints, verified stack facts |
+| `docs/01-prd` … `docs/05-interview-drill` | agent | Phase artifacts, one directory per phase |
+| `src/`, `build.gradle.kts`, `gradlew` | vendor + agent | The application |
+| `STATE.md` | agent | Durable phase/approval anchor — read first, write last |
+
+Planning is complete and merged. Execution is in progress, driven by
+`docs/03-implementation/step_NN_*.md`, so **application code in `src/` is now
+expected** — earlier revisions of this file said the opposite, which was true
+only before the skeleton was imported.
+
+Three files are vendor-owned and must stay byte-identical:
+`config/SeedData.java`, `payment/AlwaysSucceedingPaymentGateway.java`, and
+`MembershipsApplication.java`. `payment/PaymentGateway.java` and
+`src/main/resources/application.yml` may be changed **additively only**.
+
+## Build and test
+
+```bash
+./gradlew test                                  # full suite
+./gradlew test --tests '*MemberKeyTest'         # one test class
+./gradlew test --rerun-tasks                    # defeat the up-to-date cache
+./gradlew bootRun                               # :8080, logs 4 seeded plans
+```
+
+Spring Boot 4.0.0 / Spring Framework 7 on a Java 21 target. Three stack facts
+that break habits learned on Boot 3: starters are `spring-boot-starter-webmvc`
+and `-webmvc-test` (not `-web`/`-test`); `@MockBean` is **removed**, use
+`@MockitoBean`; Jackson 3 splits packages, with databind at `tools.jackson.*`
+while annotations stay at `com.fasterxml.jackson.annotation.*`. Tests run on
+JUnit Jupiter 6. No new dependencies are needed by any step.
 
 ## Session start checklist
 
