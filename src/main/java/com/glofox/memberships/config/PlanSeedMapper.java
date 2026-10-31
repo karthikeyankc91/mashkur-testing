@@ -13,12 +13,12 @@ import com.glofox.memberships.domain.PlanType;
  * vendor code that must not be edited, so an unrecognised type cannot be
  * exercised through it — the mapper has to be reachable directly.
  */
-final class PlanSeedMapper {
+public final class PlanSeedMapper {
 
     private PlanSeedMapper() {
     }
 
-    static Plan toPlan(SeedData.PlanSeed seed) {
+    public static Plan toPlan(SeedData.PlanSeed seed) {
         return new Plan(seed.id(),
                         seed.name(),
                         parseType(seed.type()),
@@ -36,7 +36,7 @@ final class PlanSeedMapper {
      * reason about. A {@code default -> PlanType.PACK} fallback would turn a
      * deployment error into silent mispricing.
      */
-    static PlanType parseType(String raw) {
+    public static PlanType parseType(String raw) {
         return switch (raw) {
             case "unlimited" -> PlanType.UNLIMITED;
             case "pack" -> PlanType.PACK;
