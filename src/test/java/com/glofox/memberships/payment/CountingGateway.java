@@ -41,6 +41,24 @@ public final class CountingGateway implements PaymentGateway {
         });
     }
 
+    /**
+     * Fails every other call, deterministically.
+     *
+     * <p>For property-based assertions: with an unpredictable mix of successes
+     * and failures, the invariant "sold + remaining == the number that existed"
+     * must still hold for every interleaving. Alternating rather than random
+     * keeps the test reproducible.
+     */
+    public static CountingGateway failingEveryOtherCall() {
+        AtomicInteger calls = new AtomicInteger();
+        return new CountingGateway(() -> {
+            if (calls.getAndIncrement() % 2 == 0) {
+                throw new PaymentDeclinedException("card declined");
+            }
+            return new PaymentResult("txn-" + UUID.randomUUID());
+        });
+    }
+
     /** Throws the umbrella type, as the brief's own instructions suggest. */
     public static CountingGateway failingWithUmbrellaType() {
         return new CountingGateway(() -> {
