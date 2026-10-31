@@ -4,6 +4,7 @@ import com.glofox.memberships.domain.MemberKey;
 import com.glofox.memberships.domain.Plan;
 import com.glofox.memberships.domain.PlanType;
 import com.glofox.memberships.domain.Purchase;
+import com.glofox.memberships.domain.PurchaseStatus;
 import com.glofox.memberships.payment.PaymentGateway;
 import com.glofox.memberships.store.InventoryStore;
 import com.glofox.memberships.store.PlanCatalogue;
@@ -146,6 +147,49 @@ public final class PurchaseService {
         // originates in one layer.
         return purchases.findById(id)
                 .orElseThrow(() -> new PurchaseNotFoundException(id));
+    }
+
+    /**
+     * Soft-cancels a purchase and gives back whatever it claimed.
+     *
+     * <h2>Why the compare-and-set comes first</h2>
+     *
+     * Restoring first and transitioning the status afterwards looks equivalent
+     * and is not. Two concurrent cancels of the same purchase would both read
+     * {@code ACTIVE}, both restore the promo slot, and only then would one lose
+     * the transition — leaving the counter one <em>above</em> where it belongs.
+     * That oversells the pack <strong>through the cancel endpoint</strong>: six
+     * people holding a five-slot promo.
+     *
+     * <p>The compare-and-set is what <em>elects</em> the single caller entitled
+     * to compensate. It is the purchase path's insight pointing the other way:
+     * there, an atomic claim precedes the work it authorises; here, an atomic
+     * transition precedes the compensation it authorises.
+     *
+     * <p>No refund is issued — out of scope for this exercise.
+     */
+    public Purchase cancel(UUID purchaseId) {
+        Purchase purchase = purchases.findById(purchaseId)
+                .orElseThrow(() -> new PurchaseNotFoundException(purchaseId));
+
+        if (!purchases.compareAndSetStatus(purchaseId,
+                                           PurchaseStatus.ACTIVE,
+                                           PurchaseStatus.CANCELLED)) {
+            throw new PurchaseAlreadyCancelledException(purchaseId);
+        }
+
+        // Only the winner of the transition reaches here, so each compensation
+        // below runs exactly once however many callers raced.
+        if (purchase.plan().type() == PlanType.UNLIMITED) {
+            releaseClaim(purchase.memberKey(), purchaseId);
+        }
+        // Unconditional: release is already a no-op for plans with no counter.
+        // Guarding it on plan type would reintroduce the confusion between
+        // pack-ness and finite inventory that purchase() deliberately avoids.
+        inventory.release(purchase.plan().planId());
+
+        return purchases.findById(purchaseId)
+                .orElseThrow(() -> new PurchaseNotFoundException(purchaseId));
     }
 
     /**

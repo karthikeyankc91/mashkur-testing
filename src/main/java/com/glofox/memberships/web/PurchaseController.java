@@ -54,4 +54,15 @@ public final class PurchaseController {
     PurchaseResponse get(@PathVariable UUID id) {
         return PurchaseAssembler.toResponse(service.getById(id));
     }
+
+    /**
+     * Soft-cancels a purchase.
+     *
+     * <p>200 with the updated purchase rather than 204: the new status is useful
+     * and the client should not have to re-fetch to see it.
+     */
+    @PostMapping("/{id}/cancel")
+    PurchaseResponse cancel(@PathVariable UUID id) {
+        return PurchaseAssembler.toResponse(service.cancel(id));
+    }
 }

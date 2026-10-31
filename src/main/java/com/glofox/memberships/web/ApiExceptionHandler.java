@@ -15,6 +15,7 @@ import com.glofox.memberships.service.BlankMemberNameException;
 import com.glofox.memberships.service.PlanInactiveException;
 import com.glofox.memberships.service.PlanNotFoundException;
 import com.glofox.memberships.service.PlanSoldOutException;
+import com.glofox.memberships.service.PurchaseAlreadyCancelledException;
 import com.glofox.memberships.service.PurchaseNotFoundException;
 import com.glofox.memberships.service.StartDateInPastException;
 import com.glofox.memberships.service.UnlimitedMembershipExistsException;
@@ -64,6 +65,10 @@ class ApiExceptionHandler {
             entry(UnlimitedMembershipExistsException.class,
                   new Mapping(CONFLICT, "unlimited_membership_exists")),
             entry(PlanSoldOutException.class, new Mapping(CONFLICT, "plan_sold_out")),
+            // The eleventh row, and the reason this table is Map.ofEntries: the
+            // Map.of overloads stop at ten pairs, which the ten others fill.
+            entry(PurchaseAlreadyCancelledException.class,
+                  new Mapping(CONFLICT, "purchase_already_cancelled")),
             entry(BlankMemberNameException.class, new Mapping(BAD_REQUEST, "validation_failed")),
             entry(StartDateInPastException.class, new Mapping(BAD_REQUEST, "start_date_in_past")),
             entry(PaymentDeclinedException.class,
