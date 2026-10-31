@@ -80,9 +80,9 @@ contract) and write `SUBMISSION.md` from the documents, which is 10 minutes.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 3 [Modular Implementation Plan]
-LAST APPROVED: TRD as a whole (merged 32ed602)
-NEXT STEP: Review this decomposition and step_01. Steps are written one at a
-           time; 02-08 are titles only until reached.
+CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 04
+LAST APPROVED: decomposition + steps 01, 02, 03
+NEXT STEP: Review step_04. The Status column above is authoritative; steps
+           05-08 are titles and budgets only until reached.
 ==================================================
 ```
