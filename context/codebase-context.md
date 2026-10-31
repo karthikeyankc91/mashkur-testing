@@ -97,6 +97,21 @@ Seeded data: Monthly Unlimited (`1111…`, unlimited, active, 8000, –, –),
 10. **`spring.jackson.property-naming-strategy` exists in Boot 4** (confirmed in
     `spring-boot-jackson-4.0.0.jar` configuration metadata, type `String`), so
     global `SNAKE_CASE` is one line of YAML rather than per-field annotations.
+11. **The test starter is richer than it looks, and it is JUnit *6*.** Resolved
+    from `testRuntimeClasspath` — nothing extra needs adding:
+
+    | Library | Version |
+    |---|---|
+    | JUnit Jupiter | **6.0.1** (not 5), incl. `junit-jupiter-params` |
+    | AssertJ | 3.27.6 |
+    | Mockito | 5.20.0 + `mockito-junit-jupiter` |
+    | `spring-test` | 7.0.1 — so `@MockitoBean` is available |
+    | Awaitility | 4.3.0 |
+    | JSONPath / JSONassert / Hamcrest / XMLUnit | present |
+
+    JUnit 6 keeps the `org.junit.jupiter.api` packages, so JUnit 5 habits mostly
+    carry over — but it is a major version, so check the version when an API
+    behaves unexpectedly rather than assuming a typo.
 
 ## Repo defect found and fixed
 

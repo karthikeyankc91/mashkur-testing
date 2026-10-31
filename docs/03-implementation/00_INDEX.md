@@ -43,8 +43,8 @@ step 01 ──▶ step 02 ──┬──▶ step 03   GET /v1/plans works end t
 |---|---|---|---|---|
 | **01** | `step_01_domain_and_ports.md` | Domain records/enums, `MemberKey`, the four store ports. No Spring anywhere | compiles; `MemberKey` tests; **forbidden-import grep** | ✅ approved |
 | **02** | `step_02_memory_stores_and_seeding.md` | The four in-memory adapters incl. both atomic primitives; `SeedingConfig`; `ClockConfig` | store-level atomicity tests; `bootRun` logs 4 plans; bad seed type fails the boot | ✅ approved |
-| **03** | `step_03_plans_endpoint.md` | `GET /v1/plans` end to end — DTO, assembler, controller, global `snake_case` | **T-8**; `curl localhost:8080/v1/plans` returns 4 plans | written |
-| **04** | `step_04_payment_port_extension.md` | TRD §1.7's two nested subtypes. Isolated so the only vendor-file diff is one reviewable commit | compiles; `AlwaysSucceedingPaymentGateway` unchanged |
+| **03** | `step_03_plans_endpoint.md` | `GET /v1/plans` end to end — DTO, assembler, controller, global `snake_case` | **T-8**; `curl localhost:8080/v1/plans` returns 4 plans | ✅ approved |
+| **04** | `step_04_payment_port_extension.md` | TRD §1.7's two nested subtypes + the shared `CountingGateway` fixture | additive-only vendor diff; `AlwaysSucceedingPaymentGateway` unchanged | written |
 | **05** | `step_05_purchase_service.md` | `PurchaseService` — the eight steps, the compensation stack with F-1's safe unwind, `StartDatePolicy`, the domain exceptions | **T-4, T-5, T-9** rules tests; **T-2, T-10** parameterised failure test |
 | **06** | `step_06_purchase_endpoints_and_errors.md` | `POST /purchases`, `GET /purchases/{id}`, `ApiExceptionHandler` with the §3.6 table | **T-6, T-7**; every row of PRD AC-10 observable |
 | **07** | `step_07_concurrency_harness.md` | The virtual-thread harness and the headline guarantees | **T-1** (4 invariants incl. charge count), **T-3** |
