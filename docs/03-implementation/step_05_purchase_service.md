@@ -258,8 +258,13 @@ private static void unwind(Deque<Runnable> compensations, RuntimeException origi
 private void releaseClaim(MemberKey key, UUID purchaseId) {
     if (!claims.release(key, purchaseId)) {               // TRD §1.4.3
         log.error("invariant breach: released a claim we did not own, member={} purchase={}",
-                  key.value(), purchaseId);
+                  forLog(key.value()), purchaseId);
     }
+}
+
+/** V-5: member_name is caller-controlled and must never reach a log raw. */
+private static String forLog(String raw) {
+    return raw == null ? "null" : raw.replaceAll("[\\r\\n\\p{Cntrl}]", "_");
 }
 
 private static void requireNonBlank(String memberName) {
@@ -271,6 +276,19 @@ private static void requireNonBlank(String memberName) {
 
 `addSuppressed` rather than letting the cleanup failure replace the original is
 the whole of F-1: **a failure handler that can fail is not a failure handler.**
+
+**`forLog` is V-5, and it applies to every user-derived value in a log
+statement.** `member_name` is caller-controlled, so a value of
+`"Alice\n2026-10-31 ERROR [c.g.m.PurchaseService] inventory reconciled to 500"`
+forges a log line, and ANSI escapes in the same field can manipulate a terminal
+tailing the log. Where the name adds nothing diagnostically, prefer logging the
+server-generated `purchaseId` and omitting it entirely — the cheapest
+sanitisation is not emitting the value.
+
+The exception messages are the other half of this: `UnlimitedMembershipExists`
+carries a `MemberKey`, and step 06's `500` branch logs the exception. Keep
+caller-supplied text out of exception messages that are logged, or sanitise at
+the logging boundary as above.
 
 ### 4.5 `getById`
 

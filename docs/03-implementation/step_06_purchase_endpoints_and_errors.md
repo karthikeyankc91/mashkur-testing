@@ -82,15 +82,34 @@ public record FieldErrorResponse(String field, String message) { }
 final class PurchaseRequestValidator {
     private PurchaseRequestValidator() { }
 
+    static final int MAX_MEMBER_NAME = 100;      // V-2
+
     static List<FieldErrorResponse> validate(PurchaseRequest request) {
         List<FieldErrorResponse> errors = new ArrayList<>();
-        if (request.memberName() == null) errors.add(new FieldErrorResponse("member_name", "must be provided"));
+        if (request.memberName() == null) {
+            errors.add(new FieldErrorResponse("member_name", "must be provided"));
+        } else if (request.memberName().strip().length() > MAX_MEMBER_NAME) {
+            errors.add(new FieldErrorResponse("member_name",
+                       "must be at most " + MAX_MEMBER_NAME + " characters"));
+        }
         if (request.planId() == null)     errors.add(new FieldErrorResponse("plan_id", "must be provided"));
         if (request.startDate() == null)  errors.add(new FieldErrorResponse("start_date", "must be provided"));
         return errors;
     }
 }
 ```
+
+**The length bound is V-2, and it belongs here rather than in `MemberKey`.** With
+no auth and no rate limit, an unbounded `member_name` is retained three times
+over — two normalised copies inside `MemberKey`, a live key in
+`UnlimitedClaimStore`, and the as-submitted display string on every `Purchase` —
+and nothing evicts, because storage is in-memory. Roughly a hundred 10 MB
+requests exhaust the heap.
+
+Putting it in the validator gets the client a `400 validation_failed` with a
+field error; putting it in `MemberKey` would surface as a mapped
+`IllegalArgumentException`. **Add test `memberNameLengthIsBounded`:** 100
+characters accepted, 101 rejected with the field named.
 
 **Only absence is checked here.** Malformed values (`"plan_id": "nope"`,
 `"start_date": "2026-13-01"`) never reach this method — Jackson throws during
@@ -221,10 +240,15 @@ explicit base row is unambiguous and reads in the same order as AC-10.
                        "Request could not be read.", request);       // no parser internals leaked
     }
 
+    /** V-6: codes whose detail must not echo anything the caller supplied. */
+    private static final Map<String, String> GENERIC_DETAIL = Map.of(
+        "unlimited_membership_exists",
+        "This member already holds an active unlimited membership.");
+
     private static ProblemDetail problem(Mapping m, String detail, HttpServletRequest request) {
         ProblemDetail pd = ProblemDetail.forStatus(m.status());
         pd.setTitle(titleFor(m.code()));
-        pd.setDetail(detail);
+        pd.setDetail(GENERIC_DETAIL.getOrDefault(m.code(), detail));
         pd.setType(URI.create("urn:glofox:problem:" + m.code().replace('_', '-')));
         pd.setInstance(URI.create(request.getRequestURI()));
         pd.setProperty("code", m.code());
@@ -250,6 +274,17 @@ Four things worth defending:
    keeps it honest.
 4. **The `errors` array appears only on `validation_failed`** (§3.5). Every other
    problem concerns the request as a whole.
+5. **`unlimited_membership_exists` gets a generic `detail` (V-6).** Echoing the
+   member key would turn an unauthenticated `409` into a membership-existence
+   oracle: probe a name, learn whether that person is a member. The key is
+   logged, not returned, and the machine-readable `code` is unchanged so clients
+   lose nothing. For this one code, "a useful detail for the client" and "a
+   useful detail for an attacker" are the same string — which is why it is the
+   only entry in `GENERIC_DETAIL` rather than a blanket policy.
+
+**Add test `membershipConflictDoesNotEchoTheMemberName`:** make the service
+throw `UnlimitedMembershipExistsException(new MemberKey("Alice"))` and assert the
+response body contains neither `Alice` nor `alice`.
 
 **Content type.** Returning `ProblemDetail` makes Spring emit
 `application/problem+json` automatically — asserted in §4.7 rather than assumed.

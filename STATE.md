@@ -5,9 +5,10 @@ Update it in the same turn that an artifact is approved and persisted.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 4 [Security & System Design Flaw Scrutiny]
-LAST APPROVED: step_08 -- Phase 3 complete, all 8 step files on main
-NEXT STEP: Review docs/04-security/VULNERABILITY-REPORT.md.
+CURRENT PHASE: Phase 5 [Interview Drill & Dry-Run Readiness]
+LAST APPROVED: Phase 4 report; V-2/V-5/V-6/V-10 amendments applied
+NEXT STEP: Review docs/05-interview-drill/DRILL.md. All five phases are
+           then complete and the blueprint is ready to execute.
 ==================================================
 ```
 
@@ -41,7 +42,9 @@ NEXT STEP: Review docs/04-security/VULNERABILITY-REPORT.md.
 | 2026-10-31 | 3 | `step_06_purchase_endpoints_and_errors.md` | **Approved** |
 | 2026-10-31 | 3 | `step_07_concurrency_harness.md` | **Approved** |
 | 2026-10-31 | 3 | `step_08_integration_and_submission.md` | **Approved** |
-| 2026-10-31 | 4 | `docs/04-security/VULNERABILITY-REPORT.md` | Draft — awaiting review |
+| 2026-10-31 | 4 | `docs/04-security/VULNERABILITY-REPORT.md` | **Approved** |
+| 2026-10-31 | 4 | V-2/V-5/V-6/V-10 amendments to steps 05, 06, 08 | **Approved** |
+| 2026-10-31 | 5 | `docs/05-interview-drill/DRILL.md` | Draft — awaiting review |
 
 ### Process defect — git history for phase 3
 

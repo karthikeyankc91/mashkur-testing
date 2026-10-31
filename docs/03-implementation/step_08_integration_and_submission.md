@@ -148,6 +148,27 @@ this way in PRD §9 — compress, do not re-argue.
    explicitly — a reviewer who tries the documented example and gets a `400`
    should find it already acknowledged rather than discover a surprise.
 
+**"Known gaps" must lead with the three an experienced reviewer will look for**
+(Phase 4 §8), so finding them already written down changes the conversation from
+"did you notice?" to "what would you do?":
+
+1. **V-1 — name squatting.** An unauthenticated caller claims the unlimited slot
+   for any name; the denial is permanent because release requires cancelling a
+   purchase the victim cannot see. Only authentication fixes it.
+2. **V-3 — no gateway timeout.** 200 hanging charges exhaust the servlet pool and
+   take `GET /v1/plans` down with them. Note that
+   `PaymentGatewayUnavailableException` exists for exactly this and currently has
+   no producer.
+3. **V-4 — charged with no record.** In-memory storage makes the gateway the only
+   durable record, so a crash between charging and saving destroys the only local
+   evidence the charge happened.
+
+Plus **V-10**, one line: JSON request bodies are not size-capped —
+Tomcat's `maxPostSize` covers form encoding, not `application/json`. V-2's
+100-character `member_name` bound limits what is *retained* but not what is
+*read*. The production answer is a reverse-proxy limit; the in-app sketch is a
+`OncePerRequestFilter` rejecting a `Content-Length` over, say, 8 KB.
+
 Also record, briefly:
 
 - **Vendor files touched: two.** `application.yml` (one additive key) and
