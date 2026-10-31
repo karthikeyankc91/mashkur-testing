@@ -5,10 +5,10 @@ Update it in the same turn that an artifact is approved and persisted.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 04
-LAST APPROVED: step_03 (GET /v1/plans end to end -- runnable milestone)
-NEXT STEP: Review step_04_payment_port_extension.md. On approval ->
-           step_05_purchase_service.md. Steps 05-08 are titles only.
+CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 05
+LAST APPROVED: step_04 (payment port extension + CountingGateway)
+NEXT STEP: Review step_05_purchase_service.md AND decide findings F-6 and
+           F-7, which amend approved documents. Then step_06.
 ==================================================
 ```
 
@@ -36,13 +36,14 @@ NEXT STEP: Review step_04_payment_port_extension.md. On approval ->
 | 2026-10-30 | 3 | `00_INDEX.md` 8-step decomposition + `step_01` | **Approved** |
 | 2026-10-31 | 3 | `step_02_memory_stores_and_seeding.md` | **Approved** |
 | 2026-10-31 | 3 | `step_03_plans_endpoint.md` | **Approved** |
-| 2026-10-31 | 3 | `step_04_payment_port_extension.md` | Draft — awaiting review |
+| 2026-10-31 | 3 | `step_04_payment_port_extension.md` | **Approved** |
+| 2026-10-31 | 3 | `step_05_purchase_service.md` | Draft — awaiting review |
 
 ### Deviations from the TRD, to record in SUBMISSION.md (step 08)
 
 | # | Deviation | Why | Introduced |
 |---|---|---|---|
-| DV-1 | TRD §1.8 put `toPlan`/`parseType` as **private** methods on `SeedingConfig`; step 02 moves them to a package-private `PlanSeedMapper` | Private methods on a `@Configuration` class cannot be unit tested, and §2.6's fail-fast-on-unknown-type requirement cannot be exercised through `SeedData`, which is immutable vendor code | step 02 |
+| DV-1 | TRD §1.8 put `toPlan`/`parseType` as **private** methods on `SeedingConfig`; step 02 moves them to `PlanSeedMapper`, made **public** in step 05 so the shared test fixture can reach it | Private methods on a `@Configuration` class cannot be unit tested, and §2.6's fail-fast-on-unknown-type requirement cannot be exercised through `SeedData`, which is immutable vendor code | step 02 |
 
 ### Phase 2.3 review findings
 
@@ -63,7 +64,9 @@ NEXT STEP: Review step_04_payment_port_extension.md. On approval ->
 | F-2 | §4.5 — batch shape errors, fail fast on semantics | Tier 0/1 | ✅ Applied |
 | F-3 | §2.5 — `PurchaseStore.compareAndSetStatus` | Tier 2 | ✅ Applied |
 | F-4 | PRD AC-10 → D-10, T-12 — `purchase_already_cancelled` | Tier 2 | ✅ Applied |
-| F-5 | PRD T-1 — fourth assertion on gateway charge count | **Tier 0/1** | ✅ Applied, **new from §5** |
+| F-5 | PRD T-1 — fourth assertion on gateway charge count | **Tier 0/1** | ✅ Applied, new from TRD §5 |
+| F-6 | TRD §1.6 + step 02 verification #4 — the clock boundary never accounted for FR-6's `createdAt`; resolved with a second holder (`PurchaseFactory`) | **Tier 0/1** | ⏸ **Pending**, new from step 05 |
+| F-7 | PRD T-2/T-10 + AC-8 — nothing asserts the unlimited claim is released on payment failure. An unlimited plan has no inventory counter, so both tests pass while the member is permanently barred | **Tier 0/1** | ⏸ **Pending**, new from step 05 |
 
 PRD carries 10 decisions and 12 tests. All F- and R- findings reached `main`
 with the TRD merge (`32ed602`).
