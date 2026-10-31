@@ -47,8 +47,8 @@ step 01 ──▶ step 02 ──┬──▶ step 03   GET /v1/plans works end t
 | **04** | `step_04_payment_port_extension.md` | TRD §1.7's two nested subtypes + the shared `CountingGateway` fixture | additive-only vendor diff; `AlwaysSucceedingPaymentGateway` unchanged | ✅ approved |
 | **05** | `step_05_purchase_service.md` | `PurchaseService` — the eight steps, the compensation stack with F-1's safe unwind, `StartDatePolicy`, `PurchaseFactory`, 7 exceptions, `ServiceConfig` | **T-4, T-5, T-9** + 7 more rules tests; **T-2, T-10** parameterised failure test | ✅ approved; F-6/F-7 applied |
 | **06** | `step_06_purchase_endpoints_and_errors.md` | `POST /purchases`, `GET /purchases/{id}`, `ApiExceptionHandler` with the §3.6 table | **T-6, T-7**; every row of PRD AC-10 observable | ✅ approved |
-| **07** | `step_07_concurrency_harness.md` | The virtual-thread harness, T-1/T-3 and two companions, plus hand-run mutation testing | **T-1** (5 invariants), **T-3**, T-3b/c, **T-13** | written, **raises F-8** |
-| **08** | `step_08_integration_and_submission.md` | End-to-end `@SpringBootTest`, then `SUBMISSION.md` from PRD §9/§12 and TRD §6 | full suite green; `SUBMISSION.md` complete |
+| **07** | `step_07_concurrency_harness.md` | The virtual-thread harness, T-1/T-3 and two companions, plus hand-run mutation testing | **T-1** (5 invariants), **T-3**, T-3b/c, **T-13** | ✅ approved; F-8 applied |
+| **08** | `step_08_integration_and_submission.md` | `WiringTest` + `PurchaseApiIntegrationTest`, `SUBMISSION.md`, and the packaging decision | `clean test` green; two contexts not five; zip free of planning artefacts | written |
 
 **Why step 04 is its own step despite being ~10 lines:** it is the only change to
 vendor code in the whole exercise. Keeping it in one commit means a reviewer can
@@ -80,9 +80,9 @@ contract) and write `SUBMISSION.md` from the documents, which is 10 minutes.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 07
-LAST APPROVED: steps 01-06, plus findings F-6 and F-7
-NEXT STEP: Review step_07 and decide F-8. Step 08 is a title and budget
-           only until reached.
+CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 08 (final)
+LAST APPROVED: steps 01-07, plus findings F-6, F-7, F-8
+NEXT STEP: Review step_08. On approval Phase 3 is complete -> merge
+           phase/03-impl to main and begin Phase 4.
 ==================================================
 ```

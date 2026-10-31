@@ -424,7 +424,12 @@ itself part of the submission.
 | **T-11** | Cancel an unlimited, then repurchase → `201` *(Tier 2 only)* | D-9 |
 | **T-12** | Concurrent double-cancel of one promo purchase: one `200`, one `409 purchase_already_cancelled`, slot restored **exactly once** *(Tier 2 only)* | D-10 / TRD F-3 — the restore path has the same check-then-act race as the decrement, and only the counter's final value catches it |
 
+| **T-13** | 500 concurrent purchases of the promo pack against a **declining** gateway: zero successes and `remaining_slots` back at exactly `5` | **Tier 0/1 despite the number.** TRD F-8 — T-2 proves cleanup for *one* failed charge and T-1 proves atomicity when *all* charges succeed; neither covers 500 failing ones, which is where a compensation leak would actually show |
+
 T-1 through T-4 are the submission's spine. T-5 through T-10 are cheap and fast.
+**T-13 belongs with the spine** — it tests the interaction of the two
+highest-risk mechanisms and reuses T-1's harness for five lines.
+
 T-11 and T-12 exist only if Tier 2 is reached — and T-12 is the one that matters,
 since T-11 would pass even with the F-3 bug present.
 
