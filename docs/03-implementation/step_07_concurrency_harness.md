@@ -326,6 +326,64 @@ load?"
 **Resolution:** added as T-13 in §4.4 above.
 **Amendment needed:** PRD §11's test table gains T-13.
 
+## 8. Mutation testing results — run, not assumed (DV-3)
+
+Both primitives were broken by hand and the suite re-run. **The result changed
+what I believe about my own tests.**
+
+### Mutant A — naive read-then-write in `InMemoryInventoryStore`
+
+```java
+int current = counter.get();
+if (current <= 0) return false;
+counter.set(current - 1);     // lost update
+```
+
+| Target | Killed |
+|---|---|
+| `promoPackSellsExactlyFiveTimesUnder500Contenders` alone | **2 of 8 runs (25%)** |
+| the full concurrency suite | **5 of 5 runs (100%)** |
+
+**The headline oversell test is far weaker than it looks.** Only 5 of 500
+attempts can ever win, so there are roughly five trips through the
+`get()`-to-`set()` window per run — too few to hit reliably.
+
+`failedChargesUnderLoadLeakNoInventory` is what actually has teeth. Every charge
+fails and returns its slot, so the five slots recycle ~490 times in one run:
+about a hundredfold more chances to lose an update. Under the mutant the counter
+finished at **11** — *above* its seeded maximum of 5, because lost updates let
+releases outnumber reservations.
+
+**This retrospectively justifies a decision that looked like laziness.**
+`release()` deliberately does not clamp at the seeded maximum (step 02 §4.2). A
+clamp would have pinned that 11 back to 5 and **hidden the broken CAS
+completely** — the safety net would have destroyed the only evidence. The
+counter's ability to hold an impossible value is what made the bug visible.
+
+### Mutant B — `containsKey` then `put` in `InMemoryUnlimitedClaimStore`
+
+```java
+if (claims.containsKey(key)) return false;
+claims.put(key, purchaseId);
+```
+
+Killed immediately by `sameMemberWinsExactlyOneUnlimitedMembership`: two
+memberships for Alice where one is allowed. This mutant dies far more readily
+than Mutant A because all 500 attempts contend on the *same* key, so every
+thread passes through the race window rather than only the winners.
+
+### What this means for the submission
+
+The honest claim is not "my concurrency tests pass". It is:
+
+- the oversell test passes **and** a deliberately broken CAS is caught, though
+  only by the failure-path test with reliability I measured rather than guessed;
+- a passing concurrency test remains weak evidence — it shows no breaking
+  interleaving was *hit*, not that none exists;
+- if this had to be stronger, the next step is not more assertions but a
+  deterministic interleaving tool (jcstress or Lincheck), which explores the
+  state space instead of sampling it.
+
 ```
 ==================================================
 CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 07
