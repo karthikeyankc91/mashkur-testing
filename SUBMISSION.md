@@ -2,8 +2,10 @@
 
 ## Time spent
 
-Approximately 3 hours on the implementation, preceded by a design pass that is
-committed separately under `docs/`. The build is green at every commit.
+Approximately 3 hours on the required core, plus about an hour on the two
+stretch features, preceded by a design pass committed separately under `docs/`.
+The build is green at every commit, and core was complete and merged before any
+stretch work began — so the core scope stands on its own.
 
 ## Assumptions
 
@@ -65,9 +67,34 @@ committed separately under `docs/`. The build is green at every commit.
 - **The clock is reachable only through two collaborators that expose no
   `now()`.** Two classes hold a `Clock`; zero business rules can read one.
 
+## Stretch features included
+
+Both are implemented and tested, after core was complete and merged.
+
+- **`POST /v1/memberships/purchases/{id}/cancel`** — soft cancel, returning the
+  promo slot and the member's unlimited slot. `200` with the updated purchase.
+  **The compare-and-set comes before the restore, and that ordering is the whole
+  point:** restore-then-CAS would let two concurrent cancels both read `ACTIVE`,
+  both restore the slot, and leave the counter *above* its maximum — overselling
+  a five-slot promo through the cancel endpoint. The CAS is what elects the one
+  caller entitled to compensate. Reordering it fails 2 of 8 cancel tests
+  immediately; 5 callers "successfully" cancel the same purchase.
+- **Optional `Idempotency-Key` header** on purchase. A replay returns the
+  original `201` and body plus `Idempotency-Replayed: true`; the same key with a
+  different payload is `409 idempotency_key_reuse`, detected via a SHA-256
+  fingerprint of the payload rather than by storing it again. A concurrent
+  duplicate gets `409 idempotent_request_in_progress`.
+
+  **An idempotency key is the same claim-or-fail pattern as the promo counter
+  and the one-unlimited rule**, so the key claim became compensation entry #0 on
+  the stack the purchase flow already had — reusing the existing unwind
+  unchanged. No new concurrency mechanism was introduced, and it fixed the
+  subtle case for free: a failed charge releases the key, so a client retrying
+  after a declined card is not told "already in progress" forever.
+
 ## Tests
 
-110 tests. Ordered by risk, not by layer.
+135 tests. Ordered by risk, not by layer.
 
 1. **Promo inventory under 500 concurrent purchases** — exactly 5 succeed, 495
    get `409 plan_sold_out`, the counter settles at 0, and **5 cards are charged,
@@ -87,8 +114,12 @@ committed separately under `docs/`. The build is green at every commit.
 5. **`remaining_slots == null` is unlimited** — guards the one-character bug of
    writing the check as `remaining > 0`, which would refuse every plan without
    an inventory limit.
-6. Error contract, every row, including that a membership conflict does not echo
-   the member name.
+6. **500 concurrent cancels of one purchase** — exactly one succeeds and the
+   slot comes back exactly once, never twice.
+7. **500 concurrent requests with one idempotency key** — one charge, and every
+   other caller either replays the same purchase or is told it is in flight.
+8. Error contract, all thirteen rows, including that a membership conflict does
+   not echo the member name.
 
 **I checked the concurrency tests can actually fail.** Replacing the CAS in
 `tryReserve` with a read-then-write: the headline oversell test caught it in

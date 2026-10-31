@@ -1,9 +1,11 @@
 package com.glofox.memberships.config;
 
+import com.glofox.memberships.storage.memory.InMemoryIdempotencyStore;
 import com.glofox.memberships.storage.memory.InMemoryInventoryStore;
 import com.glofox.memberships.storage.memory.InMemoryPlanCatalogue;
 import com.glofox.memberships.storage.memory.InMemoryPurchaseStore;
 import com.glofox.memberships.storage.memory.InMemoryUnlimitedClaimStore;
+import com.glofox.memberships.store.IdempotencyStore;
 import com.glofox.memberships.store.InventoryStore;
 import com.glofox.memberships.store.PlanCatalogue;
 import com.glofox.memberships.store.PurchaseStore;
@@ -63,5 +65,10 @@ public class SeedingConfig {
     @Bean
     PurchaseStore purchaseStore() {
         return new InMemoryPurchaseStore();
+    }
+
+    @Bean
+    IdempotencyStore idempotencyStore() {
+        return new InMemoryIdempotencyStore();
     }
 }

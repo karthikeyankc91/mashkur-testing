@@ -24,10 +24,14 @@ import com.glofox.memberships.domain.PurchaseStatus;
 import com.glofox.memberships.payment.PaymentGateway.PaymentDeclinedException;
 import com.glofox.memberships.payment.PaymentGateway.PaymentGatewayUnavailableException;
 import com.glofox.memberships.service.BlankMemberNameException;
+import com.glofox.memberships.service.IdempotencyKeyReuseException;
+import com.glofox.memberships.service.IdempotentRequestInProgressException;
+import com.glofox.memberships.service.PurchaseAlreadyCancelledException;
 import com.glofox.memberships.service.PlanInactiveException;
 import com.glofox.memberships.service.PlanNotFoundException;
 import com.glofox.memberships.service.PlanSoldOutException;
 import com.glofox.memberships.service.PurchaseNotFoundException;
+import com.glofox.memberships.service.PurchaseOutcome;
 import com.glofox.memberships.service.PurchaseService;
 import com.glofox.memberships.service.StartDateInPastException;
 import com.glofox.memberships.service.UnlimitedMembershipExistsException;
@@ -78,8 +82,8 @@ class PurchaseControllerTest {
     @Test
     @DisplayName("a valid purchase returns 201 with a Location header and the full payload")
     void createReturns201() throws Exception {
-        given(service.purchase(eq("Alice"), eq(PLAN_ID), eq(LocalDate.of(2026, 12, 1))))
-                .willReturn(samplePurchase());
+        given(service.purchase(eq("Alice"), eq(PLAN_ID), eq(LocalDate.of(2026, 12, 1)), any()))
+                .willReturn(PurchaseOutcome.created(samplePurchase()));
 
         mvc.perform(post("/v1/memberships/purchases")
                         .contentType("application/json").content(VALID_BODY))
@@ -100,7 +104,8 @@ class PurchaseControllerTest {
     @Test
     @DisplayName("the internal member key never appears on the wire")
     void memberKeyIsNotExposed() throws Exception {
-        given(service.purchase(any(), any(), any())).willReturn(samplePurchase());
+        given(service.purchase(any(), any(), any(), any()))
+                .willReturn(PurchaseOutcome.created(samplePurchase()));
 
         String body = mvc.perform(post("/v1/memberships/purchases")
                         .contentType("application/json").content(VALID_BODY))
@@ -126,7 +131,7 @@ class PurchaseControllerTest {
     @DisplayName("unknown plan maps to 404 plan_not_found")
     void unknownPlan() throws Exception {
         willThrow(new PlanNotFoundException(PLAN_ID))
-                .given(service).purchase(any(), any(), any());
+                .given(service).purchase(any(), any(), any(), any());
 
         mvc.perform(post("/v1/memberships/purchases")
                         .contentType("application/json").content(VALID_BODY))
@@ -143,7 +148,7 @@ class PurchaseControllerTest {
         Plan legacy = new Plan(SeedData.LEGACY_PLAN_ID, "Legacy Plan",
                                PlanType.UNLIMITED, false, 6_000, null);
         willThrow(new PlanInactiveException(legacy))
-                .given(service).purchase(any(), any(), any());
+                .given(service).purchase(any(), any(), any(), any());
 
         mvc.perform(post("/v1/memberships/purchases")
                         .contentType("application/json").content(VALID_BODY))
@@ -157,7 +162,7 @@ class PurchaseControllerTest {
         Plan promo = new Plan(SeedData.LAUNCH_PROMO_PACK_ID, "Launch Promo Pack",
                               PlanType.PACK, true, 2_500, 5);
         willThrow(new PlanSoldOutException(promo))
-                .given(service).purchase(any(), any(), any());
+                .given(service).purchase(any(), any(), any(), any());
 
         mvc.perform(post("/v1/memberships/purchases")
                         .contentType("application/json").content(VALID_BODY))
@@ -171,7 +176,7 @@ class PurchaseControllerTest {
         // Echoing the name would make this an unauthenticated membership-existence
         // oracle: probe a name, learn whether that person is a member here.
         willThrow(new UnlimitedMembershipExistsException(new MemberKey("Alice")))
-                .given(service).purchase(any(), any(), any());
+                .given(service).purchase(any(), any(), any(), any());
 
         String body = mvc.perform(post("/v1/memberships/purchases")
                         .contentType("application/json").content(VALID_BODY))
@@ -186,7 +191,7 @@ class PurchaseControllerTest {
     @DisplayName("a declined charge maps to 402 payment_declined")
     void paymentDeclined() throws Exception {
         willThrow(new PaymentDeclinedException("card declined"))
-                .given(service).purchase(any(), any(), any());
+                .given(service).purchase(any(), any(), any(), any());
 
         mvc.perform(post("/v1/memberships/purchases")
                         .contentType("application/json").content(VALID_BODY))
@@ -198,7 +203,7 @@ class PurchaseControllerTest {
     @DisplayName("a gateway outage maps to 502 payment_gateway_error, distinctly from a decline")
     void gatewayUnavailable() throws Exception {
         willThrow(new PaymentGatewayUnavailableException("timeout"))
-                .given(service).purchase(any(), any(), any());
+                .given(service).purchase(any(), any(), any(), any());
 
         mvc.perform(post("/v1/memberships/purchases")
                         .contentType("application/json").content(VALID_BODY))
@@ -210,7 +215,7 @@ class PurchaseControllerTest {
     @DisplayName("a blank name reaching the service maps to 400 validation_failed")
     void blankName() throws Exception {
         willThrow(new BlankMemberNameException())
-                .given(service).purchase(any(), any(), any());
+                .given(service).purchase(any(), any(), any(), any());
 
         mvc.perform(post("/v1/memberships/purchases")
                         .contentType("application/json")
@@ -227,7 +232,7 @@ class PurchaseControllerTest {
     @DisplayName("a past start date maps to 400 start_date_in_past, distinct from validation_failed")
     void pastStartDate() throws Exception {
         willThrow(new StartDateInPastException(LocalDate.of(2020, 1, 1)))
-                .given(service).purchase(any(), any(), any());
+                .given(service).purchase(any(), any(), any(), any());
 
         mvc.perform(post("/v1/memberships/purchases")
                         .contentType("application/json").content(VALID_BODY))
@@ -260,13 +265,14 @@ class PurchaseControllerTest {
                         .value(org.hamcrest.Matchers.containsInAnyOrder(
                                 "member_name", "plan_id", "start_date")));
 
-        verify(service, never()).purchase(any(), any(), any());
+        verify(service, never()).purchase(any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("the member name length is bounded at 100 characters")
     void memberNameLengthIsBounded() throws Exception {
-        given(service.purchase(any(), any(), any())).willReturn(samplePurchase());
+        given(service.purchase(any(), any(), any(), any()))
+                .willReturn(PurchaseOutcome.created(samplePurchase()));
 
         mvc.perform(post("/v1/memberships/purchases")
                         .contentType("application/json")
@@ -306,7 +312,7 @@ class PurchaseControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("validation_failed"));
 
-        verify(service, never()).purchase(any(), any(), any());
+        verify(service, never()).purchase(any(), any(), any(), any());
     }
 
     @Test
@@ -316,6 +322,83 @@ class PurchaseControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.code").value("validation_failed"));
+    }
+
+    // ----- idempotency header ----------------------------------------------
+
+    @Test
+    @DisplayName("the Idempotency-Key header is passed through to the service")
+    void idempotencyKeyIsPassedThrough() throws Exception {
+        given(service.purchase(any(), any(), any(), eq("key-1")))
+                .willReturn(PurchaseOutcome.created(samplePurchase()));
+
+        mvc.perform(post("/v1/memberships/purchases")
+                        .header("Idempotency-Key", "key-1")
+                        .contentType("application/json").content(VALID_BODY))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Idempotency-Replayed", "false"));
+    }
+
+    @Test
+    @DisplayName("a replay returns the original 201 plus the replay header")
+    void replayIsReportedInAHeader() throws Exception {
+        given(service.purchase(any(), any(), any(), any()))
+                .willReturn(PurchaseOutcome.replayed(samplePurchase()));
+
+        mvc.perform(post("/v1/memberships/purchases")
+                        .header("Idempotency-Key", "key-1")
+                        .contentType("application/json").content(VALID_BODY))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Idempotency-Replayed", "true"))
+                .andExpect(jsonPath("$.id").value(PURCHASE_ID.toString()));
+    }
+
+    @Test
+    @DisplayName("a key in flight maps to 409 idempotent_request_in_progress")
+    void keyInFlight() throws Exception {
+        willThrow(new IdempotentRequestInProgressException())
+                .given(service).purchase(any(), any(), any(), any());
+
+        mvc.perform(post("/v1/memberships/purchases")
+                        .header("Idempotency-Key", "key-1")
+                        .contentType("application/json").content(VALID_BODY))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("idempotent_request_in_progress"));
+    }
+
+    @Test
+    @DisplayName("a reused key maps to 409 idempotency_key_reuse")
+    void keyReuse() throws Exception {
+        willThrow(new IdempotencyKeyReuseException())
+                .given(service).purchase(any(), any(), any(), any());
+
+        mvc.perform(post("/v1/memberships/purchases")
+                        .header("Idempotency-Key", "key-1")
+                        .contentType("application/json").content(VALID_BODY))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("idempotency_key_reuse"));
+    }
+
+    @Test
+    @DisplayName("cancelling returns 200 with the cancelled purchase")
+    void cancelReturns200() throws Exception {
+        given(service.cancel(PURCHASE_ID)).willReturn(
+                samplePurchase().withStatus(PurchaseStatus.CANCELLED));
+
+        mvc.perform(post("/v1/memberships/purchases/" + PURCHASE_ID + "/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("cancelled"));
+    }
+
+    @Test
+    @DisplayName("a second cancel maps to 409 purchase_already_cancelled")
+    void doubleCancelMapsTo409() throws Exception {
+        willThrow(new PurchaseAlreadyCancelledException(PURCHASE_ID))
+                .given(service).cancel(PURCHASE_ID);
+
+        mvc.perform(post("/v1/memberships/purchases/" + PURCHASE_ID + "/cancel"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("purchase_already_cancelled"));
     }
 
     private static String bodyWithName(String name) {

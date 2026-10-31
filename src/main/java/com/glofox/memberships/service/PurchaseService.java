@@ -6,10 +6,14 @@ import com.glofox.memberships.domain.PlanType;
 import com.glofox.memberships.domain.Purchase;
 import com.glofox.memberships.domain.PurchaseStatus;
 import com.glofox.memberships.payment.PaymentGateway;
+import com.glofox.memberships.store.IdempotencyStore;
 import com.glofox.memberships.store.InventoryStore;
 import com.glofox.memberships.store.PlanCatalogue;
 import com.glofox.memberships.store.PurchaseStore;
 import com.glofox.memberships.store.UnlimitedClaimStore;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -46,6 +50,7 @@ public final class PurchaseService {
     private final InventoryStore inventory;
     private final UnlimitedClaimStore claims;
     private final PurchaseStore purchases;
+    private final IdempotencyStore idempotency;
     private final PaymentGateway gateway;
     private final StartDatePolicy startDates;
     private final PurchaseFactory factory;
@@ -54,6 +59,7 @@ public final class PurchaseService {
                            InventoryStore inventory,
                            UnlimitedClaimStore claims,
                            PurchaseStore purchases,
+                           IdempotencyStore idempotency,
                            PaymentGateway gateway,
                            StartDatePolicy startDates,
                            PurchaseFactory factory) {
@@ -61,6 +67,7 @@ public final class PurchaseService {
         this.inventory = inventory;
         this.claims = claims;
         this.purchases = purchases;
+        this.idempotency = idempotency;
         this.gateway = gateway;
         this.startDates = startDates;
         this.factory = factory;
@@ -74,6 +81,23 @@ public final class PurchaseService {
      * with no behaviour.
      */
     public Purchase purchase(String memberName, UUID planId, LocalDate startDate) {
+        return purchase(memberName, planId, startDate, null).purchase();
+    }
+
+    /**
+     * Purchases a membership, optionally deduplicated by an idempotency key.
+     *
+     * <p>A null or blank key means exactly the behaviour above — no key store is
+     * touched at all.
+     *
+     * <p>The key claim becomes <strong>compensation entry #0</strong> on the
+     * same stack the rest of the flow uses, so a failed charge releases the key
+     * through the existing unwind. Without that, an honest client retrying after
+     * a declined card would be told its request was already in progress
+     * forever.
+     */
+    public PurchaseOutcome purchase(String memberName, UUID planId, LocalDate startDate,
+                                    String idempotencyKey) {
 
         // --- semantics the service owns, cheapest first ----------------------
         requireNonBlank(memberName);
@@ -100,6 +124,26 @@ public final class PurchaseService {
         Deque<Runnable> compensations = new ArrayDeque<>();
 
         try {
+            // --- entry #0: claim the idempotency key, if one was supplied ----
+            // Same claim-or-fail shape as the two below. Pushed first so it is
+            // released last, after the inventory and claim it guards.
+            boolean keyed = idempotencyKey != null && !idempotencyKey.isBlank();
+            if (keyed) {
+                String fingerprint = fingerprintOf(memberName, planId, startDate);
+                switch (idempotency.claim(idempotencyKey, fingerprint)) {
+                    case IdempotencyStore.Claim.Replay(UUID existingId) -> {
+                        // Nothing is charged on this path. Return the original.
+                        return PurchaseOutcome.replayed(getById(existingId));
+                    }
+                    case IdempotencyStore.Claim.InProgress() ->
+                            throw new IdempotentRequestInProgressException();
+                    case IdempotencyStore.Claim.Conflict() ->
+                            throw new IdempotencyKeyReuseException();
+                    case IdempotencyStore.Claim.Acquired() ->
+                            compensations.push(() -> idempotency.release(idempotencyKey));
+                }
+            }
+
             // --- claim the member's single unlimited slot --------------------
             if (plan.type() == PlanType.UNLIMITED) {
                 if (!claims.tryClaim(key, purchaseId)) {
@@ -131,7 +175,13 @@ public final class PurchaseService {
             Purchase purchase = factory.create(purchaseId, memberName, key, plan,
                                                startDate, result.transactionId());
             purchases.save(purchase);
-            return purchase;
+
+            // Recorded only after the purchase is saved, so a retry can never
+            // replay an id that is not yet retrievable.
+            if (keyed) {
+                idempotency.complete(idempotencyKey, purchaseId);
+            }
+            return PurchaseOutcome.created(purchase);
 
         } catch (RuntimeException original) {
             // Catching RuntimeException rather than PaymentFailedException is
@@ -234,6 +284,32 @@ public final class PurchaseService {
      */
     private static String forLog(String raw) {
         return raw == null ? "null" : raw.replaceAll("[\\r\\n\\p{Cntrl}]", "_");
+    }
+
+    /**
+     * A fixed-size digest of the request, so one key reused with a different
+     * body is detectable.
+     *
+     * <p>A hash rather than the raw payload: storing the submitted name here
+     * would retain an unbounded caller-controlled string a fourth time, which
+     * is the heap concern the length bound addresses. A digest is 64 characters
+     * whatever the input.
+     */
+    private static String fingerprintOf(String memberName, UUID planId, LocalDate startDate) {
+        String payload = memberName + "|" + planId + "|" + startDate;
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(payload.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >> 4) & 0xf, 16));
+                hex.append(Character.forDigit(b & 0xf, 16));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException impossible) {
+            // SHA-256 is required of every JVM implementation.
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
     }
 
     private static void requireNonBlank(String memberName) {
