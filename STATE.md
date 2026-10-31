@@ -5,15 +5,14 @@ Update it in the same turn that an artifact is approved and persisted.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 08 (final)
-LAST APPROVED: step_07 (concurrency harness); F-8 applied as PRD T-13
-NEXT STEP: Review step_08_integration_and_submission.md. On approval
-           Phase 3 is complete -> merge phase/03-impl to main, begin
-           Phase 4 (security and design flaw scrutiny).
+CURRENT PHASE: Phase 5 [Interview Drill & Dry-Run Readiness]
+LAST APPROVED: Phase 4 report; V-2/V-5/V-6/V-10 amendments applied
+NEXT STEP: Review docs/05-interview-drill/DRILL.md. All five phases are
+           then complete and the blueprint is ready to execute.
 ==================================================
 ```
 
-**Branch:** `phase/03-impl` — merges to `main` as steps are approved
+**Branch:** `phase/04-security` — merges to `main` on approval
 **Project:** Glofox Memberships Purchase API take-home (Java 21 / Spring Boot 4.0.0)
 
 ## Approval log
@@ -42,7 +41,25 @@ NEXT STEP: Review step_08_integration_and_submission.md. On approval
 | 2026-10-31 | 3 | F-6 + F-7 amendments to TRD §1.6, PRD AC-8/T-2/T-10, step_02 | **Approved** |
 | 2026-10-31 | 3 | `step_06_purchase_endpoints_and_errors.md` | **Approved** |
 | 2026-10-31 | 3 | `step_07_concurrency_harness.md` | **Approved** |
-| 2026-10-31 | 3 | `step_08_integration_and_submission.md` | Draft — awaiting review |
+| 2026-10-31 | 3 | `step_08_integration_and_submission.md` | **Approved** |
+| 2026-10-31 | 4 | `docs/04-security/VULNERABILITY-REPORT.md` | **Approved** |
+| 2026-10-31 | 4 | V-2/V-5/V-6/V-10 amendments to steps 05, 06, 08 | **Approved** |
+| 2026-10-31 | 5 | `docs/05-interview-drill/DRILL.md` | Draft — awaiting review |
+
+### Process defect — git history for phase 3
+
+`git merge` in this environment does **not** accept `-F <file>`, and the failure
+was hidden because the command's output was piped through `tail`. Two
+consequences, both recorded rather than rewritten:
+
+1. The phase-2 merge was retried and succeeded (`32ed602`, a real merge commit).
+2. **Phase 3 steps 04-08 were committed directly to `main`**, so phase 3 has no
+   branch and no merge boundary -- its commits are linear on `main`. All content
+   is present and correct; only the convention in `CLAUDE.md` was broken.
+
+**Fix going forward:** merge with `--no-ff --no-commit` then `git commit -F
+<file>`, and never pipe git output through `tail`. Verify every merge with
+`git cat-file -p main | grep -c '^parent'` expecting 2.
 
 ### Deviations from the TRD, to record in SUBMISSION.md (step 08)
 
