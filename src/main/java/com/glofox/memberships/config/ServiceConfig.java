@@ -4,6 +4,7 @@ import com.glofox.memberships.payment.PaymentGateway;
 import com.glofox.memberships.service.PurchaseFactory;
 import com.glofox.memberships.service.PurchaseService;
 import com.glofox.memberships.service.StartDatePolicy;
+import com.glofox.memberships.store.IdempotencyStore;
 import com.glofox.memberships.store.InventoryStore;
 import com.glofox.memberships.store.PlanCatalogue;
 import com.glofox.memberships.store.PurchaseStore;
@@ -37,10 +38,11 @@ public class ServiceConfig {
                                     InventoryStore inventory,
                                     UnlimitedClaimStore claims,
                                     PurchaseStore purchases,
+                                    IdempotencyStore idempotency,
                                     PaymentGateway gateway,
                                     StartDatePolicy startDates,
                                     PurchaseFactory factory) {
-        return new PurchaseService(catalogue, inventory, claims, purchases,
+        return new PurchaseService(catalogue, inventory, claims, purchases, idempotency,
                                    gateway, startDates, factory);
     }
 }

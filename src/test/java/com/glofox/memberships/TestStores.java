@@ -6,10 +6,12 @@ import com.glofox.memberships.payment.CountingGateway;
 import com.glofox.memberships.service.PurchaseFactory;
 import com.glofox.memberships.service.PurchaseService;
 import com.glofox.memberships.service.StartDatePolicy;
+import com.glofox.memberships.storage.memory.InMemoryIdempotencyStore;
 import com.glofox.memberships.storage.memory.InMemoryInventoryStore;
 import com.glofox.memberships.storage.memory.InMemoryPlanCatalogue;
 import com.glofox.memberships.storage.memory.InMemoryPurchaseStore;
 import com.glofox.memberships.storage.memory.InMemoryUnlimitedClaimStore;
+import com.glofox.memberships.store.IdempotencyStore;
 import com.glofox.memberships.store.InventoryStore;
 import com.glofox.memberships.store.PlanCatalogue;
 import com.glofox.memberships.store.PurchaseStore;
@@ -56,6 +58,7 @@ public final class TestStores {
                           InventoryStore inventory,
                           UnlimitedClaimStore claims,
                           PurchaseStore purchases,
+                          IdempotencyStore idempotency,
                           CountingGateway gateway,
                           PurchaseService service) {
     }
@@ -69,12 +72,14 @@ public final class TestStores {
         InventoryStore inventory = inventory();
         UnlimitedClaimStore claims = new InMemoryUnlimitedClaimStore();
         PurchaseStore purchases = new InMemoryPurchaseStore();
+        IdempotencyStore idempotency = new InMemoryIdempotencyStore();
 
         PurchaseService service = new PurchaseService(
-                catalogue, inventory, claims, purchases, gateway,
+                catalogue, inventory, claims, purchases, idempotency, gateway,
                 new StartDatePolicy(clock), new PurchaseFactory(clock));
 
-        return new Fixture(catalogue, inventory, claims, purchases, gateway, service);
+        return new Fixture(catalogue, inventory, claims, purchases, idempotency,
+                           gateway, service);
     }
 
     public static Fixture succeeding() {

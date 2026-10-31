@@ -12,9 +12,12 @@ import com.glofox.memberships.payment.PaymentGateway.PaymentDeclinedException;
 import com.glofox.memberships.payment.PaymentGateway.PaymentFailedException;
 import com.glofox.memberships.payment.PaymentGateway.PaymentGatewayUnavailableException;
 import com.glofox.memberships.service.BlankMemberNameException;
+import com.glofox.memberships.service.IdempotencyKeyReuseException;
+import com.glofox.memberships.service.IdempotentRequestInProgressException;
 import com.glofox.memberships.service.PlanInactiveException;
 import com.glofox.memberships.service.PlanNotFoundException;
 import com.glofox.memberships.service.PlanSoldOutException;
+import com.glofox.memberships.service.PurchaseAlreadyCancelledException;
 import com.glofox.memberships.service.PurchaseNotFoundException;
 import com.glofox.memberships.service.StartDateInPastException;
 import com.glofox.memberships.service.UnlimitedMembershipExistsException;
@@ -48,9 +51,10 @@ class ApiExceptionHandler {
      * Exception to status and machine-readable code.
      *
      * <p><strong>{@code Map.ofEntries}, not {@code Map.of}.</strong> The
-     * overloads of {@code Map.of} stop at ten pairs and this table has exactly
-     * ten; the cancel endpoint's eleventh row would simply fail to compile.
-     * Better to start past the cliff than to discover it later.
+     * overloads of {@code Map.of} stop at ten pairs. Core scope filled exactly
+     * ten, and the table has since grown to thirteen — so {@code Map.of} would
+     * have failed to compile on the first row added, with an unhelpful arity
+     * error. Cheaper to start past that cliff than to discover it later.
      *
      * <p><strong>Lookup is by exact class, not {@code instanceof}.</strong> The
      * two payment subtypes extend {@code PaymentFailedException}, so a hierarchy
@@ -64,7 +68,15 @@ class ApiExceptionHandler {
             entry(UnlimitedMembershipExistsException.class,
                   new Mapping(CONFLICT, "unlimited_membership_exists")),
             entry(PlanSoldOutException.class, new Mapping(CONFLICT, "plan_sold_out")),
+            // The eleventh row, and the reason this table is Map.ofEntries: the
+            // Map.of overloads stop at ten pairs, which the ten others fill.
+            entry(PurchaseAlreadyCancelledException.class,
+                  new Mapping(CONFLICT, "purchase_already_cancelled")),
             entry(BlankMemberNameException.class, new Mapping(BAD_REQUEST, "validation_failed")),
+            entry(IdempotentRequestInProgressException.class,
+                  new Mapping(CONFLICT, "idempotent_request_in_progress")),
+            entry(IdempotencyKeyReuseException.class,
+                  new Mapping(CONFLICT, "idempotency_key_reuse")),
             entry(StartDateInPastException.class, new Mapping(BAD_REQUEST, "start_date_in_past")),
             entry(PaymentDeclinedException.class,
                   new Mapping(PAYMENT_REQUIRED, "payment_declined")),
