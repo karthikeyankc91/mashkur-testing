@@ -46,8 +46,8 @@ step 01 ──▶ step 02 ──┬──▶ step 03   GET /v1/plans works end t
 | **03** | `step_03_plans_endpoint.md` | `GET /v1/plans` end to end — DTO, assembler, controller, global `snake_case` | **T-8**; `curl localhost:8080/v1/plans` returns 4 plans | ✅ approved |
 | **04** | `step_04_payment_port_extension.md` | TRD §1.7's two nested subtypes + the shared `CountingGateway` fixture | additive-only vendor diff; `AlwaysSucceedingPaymentGateway` unchanged | ✅ approved |
 | **05** | `step_05_purchase_service.md` | `PurchaseService` — the eight steps, the compensation stack with F-1's safe unwind, `StartDatePolicy`, `PurchaseFactory`, 7 exceptions, `ServiceConfig` | **T-4, T-5, T-9** + 7 more rules tests; **T-2, T-10** parameterised failure test | ✅ approved; F-6/F-7 applied |
-| **06** | `step_06_purchase_endpoints_and_errors.md` | `POST /purchases`, `GET /purchases/{id}`, `ApiExceptionHandler` with the §3.6 table | **T-6, T-7**; every row of PRD AC-10 observable | written |
-| **07** | `step_07_concurrency_harness.md` | The virtual-thread harness and the headline guarantees | **T-1** (4 invariants incl. charge count), **T-3** |
+| **06** | `step_06_purchase_endpoints_and_errors.md` | `POST /purchases`, `GET /purchases/{id}`, `ApiExceptionHandler` with the §3.6 table | **T-6, T-7**; every row of PRD AC-10 observable | ✅ approved |
+| **07** | `step_07_concurrency_harness.md` | The virtual-thread harness, T-1/T-3 and two companions, plus hand-run mutation testing | **T-1** (5 invariants), **T-3**, T-3b/c, **T-13** | written, **raises F-8** |
 | **08** | `step_08_integration_and_submission.md` | End-to-end `@SpringBootTest`, then `SUBMISSION.md` from PRD §9/§12 and TRD §6 | full suite green; `SUBMISSION.md` complete |
 
 **Why step 04 is its own step despite being ~10 lines:** it is the only change to
@@ -80,9 +80,9 @@ contract) and write `SUBMISSION.md` from the documents, which is 10 minutes.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 06
-LAST APPROVED: steps 01-05, plus findings F-6 and F-7
-NEXT STEP: Review step_06. The Status column above is authoritative; steps
-           07-08 are titles and budgets only until reached.
+CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 07
+LAST APPROVED: steps 01-06, plus findings F-6 and F-7
+NEXT STEP: Review step_07 and decide F-8. Step 08 is a title and budget
+           only until reached.
 ==================================================
 ```
