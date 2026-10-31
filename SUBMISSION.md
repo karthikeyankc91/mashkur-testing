@@ -127,7 +127,7 @@ reliably.** Three mutants, each run repeatedly:
 | Broken on purpose | Symptom | Caught |
 |---|---|---|
 | inventory CAS → read-then-write | oversells; counter inflates to 6–20 | **3/16** by the oversell test alone; **5/5** by the full suite |
-| `putIfAbsent` → `containsKey`+`put` | 2–3 unlimited memberships per member | **9/12** |
+| `putIfAbsent` → `containsKey`+`put` | 2–3 unlimited memberships per member | **9/12** → **12/12** after `@RepeatedTest(10)` |
 | cancel restores before the CAS | 2–6 callers cancel the same purchase | **5/5** |
 
 The first row is the interesting one. **My headline oversell test is far weaker
@@ -141,10 +141,20 @@ does not clamp at the seeded maximum. A clamp would have pinned all those
 inflated counters back to 5 and **inverted the result** — the mutant would have
 survived every run instead of dying every run.
 
+The measurement then changed the code. The one-unlimited race was detected in
+only 9 of 12 runs, so that test now carries `@RepeatedTest(10)` — re-measured at
+**12 of 12**, with 2 to 8 of the ten repetitions failing per run, which puts the
+single-attempt rate near 50%. It costs ~50ms.
+
+Notably that lever does *not* help the oversell test: its weakness is structural
+rather than statistical — only 5 of 500 attempts reach the race window — so ten
+repetitions would reach roughly 88%, not certainty. It needed a different test,
+not more runs of the same one.
+
 A passing concurrency test is still weak evidence: it shows no breaking
-interleaving was *hit*, not that none exists. The weakest link is now the
-one-unlimited race at 75% per run; `@RepeatedTest` would close that, and a
-deterministic interleaving tool (jcstress, Lincheck) is the real answer.
+interleaving was *hit*, not that none exists. The real answer is a deterministic
+interleaving tool — jcstress or Lincheck — which explores the state space
+instead of sampling it.
 
 ## Known gaps / what I would do next
 

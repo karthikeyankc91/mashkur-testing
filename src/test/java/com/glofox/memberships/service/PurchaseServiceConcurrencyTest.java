@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -72,11 +73,22 @@ class PurchaseServiceConcurrencyTest {
                 .containsOnly(2_500);
     }
 
-    @Test
+    @RepeatedTest(10)
     @DisplayName("500 simultaneous attempts by one member yield exactly one unlimited membership")
     void sameMemberWinsExactlyOneUnlimitedMembership() {
         // The race the brief never mentions. It has precisely the same
         // check-then-act shape as the promo counter.
+        //
+        // Repeated ten times, and the repetition count is evidence-driven rather
+        // than superstitious. Mutation testing measured this as the weakest
+        // detection in the suite: replacing putIfAbsent with containsKey-then-put
+        // was caught in only 9 of 12 suite runs, against 5 of 5 for the other two
+        // mutants. Ten samples per run turn roughly even odds per attempt into
+        // near-certainty, and the whole test costs ~50ms.
+        //
+        // Fresh stores per repetition, because the fixture is built inside the
+        // method body - a shared claim store would make every repetition after
+        // the first assert nothing.
         TestStores.Fixture f = TestStores.succeeding();
 
         List<Outcome<Purchase>> outcomes = Concurrency.raceAll(CONTENDERS, () ->

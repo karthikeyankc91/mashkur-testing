@@ -379,20 +379,36 @@ claims.put(key, purchaseId);
 
 | Target | Killed |
 |---|---|
-| the full concurrency suite | **9 of 12 runs (75%)** |
+| the full concurrency suite, single `@Test` | **9 of 12 runs (75%)** |
+| the full concurrency suite, `@RepeatedTest(10)` | **12 of 12 runs (100%)** |
 
 Killed by `sameMemberWinsExactlyOneUnlimitedMembership` and its case/whitespace
 companion, granting **2 or 3** memberships where one is allowed.
+
+**Fixed, and the fix was measured rather than assumed.**
+`sameMemberWinsExactlyOneUnlimitedMembership` now carries `@RepeatedTest(10)`.
+Re-measuring the same mutant over another 12 suite runs: killed **12 of 12**,
+with **2 to 8** of the ten repetitions failing per run. Those counts imply a
+single-attempt detection rate of roughly 40-50%, so one `@Test` was close to a
+coin flip and ten samples drops the chance of a total miss to about 0.1%. The
+whole test costs ~50ms, so there was no trade-off to weigh.
+
+**Why this lever does not help Mutant A.** `@RepeatedTest` only buys
+reliability when each attempt independently samples the same race. Mutant A's
+oversell test has a *structural* limit: only 5 of 500 attempts ever reach the
+race window, so repeating it ten times would move ~19% to roughly 88%, not to
+certainty. That one needed a different test — the failure-path test, which
+recycles the slots ~490 times — rather than more runs of the same one. Worth
+knowing which of the two problems you have before reaching for the annotation.
 
 **Correction to an earlier draft of this section**, which said this mutant
 "dies immediately" and far more readily than Mutant A. That was one observation,
 and a larger sample disagrees: a first 5-run sample killed it only **1 of 5**,
 and the 12-run sample settled at 75%. It is more detectable than Mutant A's
 *targeted* test (~19%) because all 500 attempts contend on the same key rather
-than only 5 winning, but it is **less** reliable than the suite's 100% against
-Mutant A — so **this is now the weakest detection in the suite.** The cheap
-hardening is `@RepeatedTest(10)` on that one test, which drives 75% per run to
-effectively certain.
+than only 5 winning, but it was **less** reliable than the suite's 100% against
+Mutant A — which made it the weakest detection in the suite until
+`@RepeatedTest(10)` closed it to 12 of 12.
 
 ### What this means for the submission
 
@@ -400,8 +416,8 @@ The honest claim is not "my concurrency tests pass". It is:
 
 - the oversell test passes **and** a deliberately broken CAS is caught, though
   only by the failure-path test, with reliability I measured rather than guessed
-  — and two of the three mutants are caught 100% of the time while the third is
-  caught 75% of the time;
+  — all three mutants are now caught in every run, the third only after
+  `@RepeatedTest(10)` was added on the strength of the measurement;
 - a passing concurrency test remains weak evidence — it shows no breaking
   interleaving was *hit*, not that none exists;
 - if this had to be stronger, the next step is not more assertions but a

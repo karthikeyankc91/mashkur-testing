@@ -18,7 +18,7 @@ parents. Working tree clean. Pushed to `origin`.
 
 | Check | Result |
 |---|---|
-| `./gradlew clean test` | **135 tests, 0 failures** |
+| `./gradlew clean test` | **144 tests, 0 failures** |
 | Live end-to-end sweep | **23 of 23 assertions pass** |
 | Concurrency suite repeatability | 10 consecutive clean runs, no flakes |
 | Vendor files byte-identical | `SeedData`, `AlwaysSucceedingPaymentGateway`, `MembershipsApplication`, `package-info`, `build.gradle.kts`, `settings.gradle.kts` |
@@ -43,7 +43,7 @@ complete submittable solution from `919f4bb` onward.
 |---|---|---|
 | **DV-2** | Step 01 justified `strip()` over `trim()` with a non-breaking-space example. **Wrong** — `Character.isWhitespace` excludes `U+00A0`, so `strip()` leaves it exactly where `trim()` does. `"Alice"` vs `"Alice "` would have been different members, making the one-unlimited rule bypassable with an invisible character | `MemberKey` folds on `isWhitespace \|\| isSpaceChar`; recorded in `step_01` §7 |
 | **DV-3** | **Mutation testing measured over repeated runs, not assumed.** Broken inventory CAS: caught **3 of 16** by the oversell test alone (~19%), **5 of 5** by the full suite; counter inflated to 6–20, above its seeded max. Broken claim store: **9 of 12** (75%). Cancel restore-before-CAS: **5 of 5**, with 2–6 callers each cancelling one purchase | Recorded in `step_07` §8 and `SUBMISSION.md`. Retrospectively justifies `release()` not clamping: a clamp would have *inverted* the result, surviving 5/5 instead of dying 5/5 |
-| **DV-4** | **Correction to my own earlier claim.** I wrote that the claim-store mutant "dies immediately" and far more readily than the inventory one. One observation; a 5-run sample then killed it only 1 of 5, and a 12-run sample settled at 75%. It is the **weakest detection in the suite** | Figures corrected in `step_07` §8 and `SUBMISSION.md`; `@RepeatedTest(10)` named as the cheap hardening |
+| **DV-4** | **Correction to my own earlier claim.** I wrote that the claim-store mutant "dies immediately" and far more readily than the inventory one. One observation; a 5-run sample then killed it only 1 of 5, and a 12-run sample settled at 75% — the weakest detection in the suite | Figures corrected in `step_07` §8 and `SUBMISSION.md`, then **fixed**: `@RepeatedTest(10)` on `sameMemberWinsExactlyOneUnlimitedMembership`, re-measured at **12 of 12** |
 | — | Boot 4 relocated `@WebMvcTest` to `org.springframework.boot.webmvc.test.autoconfigure`, and Jackson autoconfiguration to the `spring-boot-jackson` module | Verified against the resolved classpath before writing code |
 | — | My own test asserted `charges() == 5` under a declining gateway. Wrong: compensation returns each slot immediately, so ~490 contenders each acquire one | Corrected to the real invariant, with the wrong mental model documented in the test |
 | — | `PurchaseControllerTest` broke when the 4-arg overload landed — the mock returned `null` and every mapped error became a 500 | Caught by the build; stubs updated and new coverage added |
