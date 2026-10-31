@@ -64,8 +64,8 @@ NEXT STEP: Review step_03_plans_endpoint.md. On approval ->
 | F-4 | PRD AC-10 → D-10, T-12 — `purchase_already_cancelled` | Tier 2 | ✅ Applied |
 | F-5 | PRD T-1 — fourth assertion on gateway charge count | **Tier 0/1** | ✅ Applied, **new from §5** |
 
-PRD now carries 10 decisions and 12 tests. F-4/F-5's PRD edits sit on
-`phase/02-trd` and reach `main` when the TRD merges.
+PRD carries 10 decisions and 12 tests. All F- and R- findings reached `main`
+with the TRD merge (`32ed602`).
 
 ## Locked decisions
 
@@ -82,6 +82,7 @@ Full reasoning in PRD §9. Summarised here so a cold session does not re-litigat
 | D-7 | Plan reference on purchase | Snapshot, not bare `plan_id` |
 | D-8 | `start_date` lower bound | Reject strictly before today; no upper bound |
 | D-9 | Cancel and the unlimited slot | Cancelled frees the member immediately |
+| D-10 | Double cancel | `409 purchase_already_cancelled`, not a silent idempotent `200` *(Tier 2)* |
 
 **Scope:** Tier 0 core + Tier 1 (error codes **and** the decline/outage split)
 committed. Tier 2 (cancel) and Tier 3 (idempotency) gated — PRD §10.
@@ -108,20 +109,20 @@ landing map.
 
 None. `context/` is filled; the build runs.
 
-## Carried risks for Phase 2
+## Skeleton traps — all now resolved in the TRD, carried for implementation
 
-Not blockers, but the TRD must address each. Detail in
-`context/codebase-context.md`.
+These were the Phase 2 carried risks. Each is settled; the column says where the
+answer lives, because these are the things an implementer gets wrong by reflex.
+Full detail in `context/codebase-context.md`.
 
-1. `@MockBean` is **removed in Boot 4** — the failing-gateway test needs
-   `@MockitoBean` or `@TestConfiguration` + `@Primary`.
-2. No `spring-boot-starter-validation` on the classpath — add it or hand-roll.
-3. `remainingSlots == null` means *unlimited*, not zero (3 of 4 plans).
-4. `PaymentFailedException` is unchecked — easy to leak a `500` over partial state.
-5. NFR-2 ordering (charge vs decrement) is the TRD's central decision.
-6. **Q-1 put a clock back in.** NFR-5 confines it to validation; TRD §1.6 must
-   make that structural, or T-1/T-3 become time-sensitive.
-7. **Q-3 extends the payment port.** TRD §1.7 picks the mechanism;
-   `AlwaysSucceedingPaymentGateway` must keep compiling untouched.
-8. **Cleanup parity across both payment failure modes** (TRD §4.9) — splitting one
-   failure path into two is when the second one loses the cleanup guarantee.
+| # | Trap | Resolved in |
+|---|---|---|
+| 1 | `@MockBean` **removed in Boot 4** — use `@MockitoBean`, or constructor injection | TRD §5.2 (mostly a stub, not an annotation) |
+| 2 | No `spring-boot-starter-validation` on the classpath | TRD §1.5 — hand-rolled, starter not added |
+| 3 | `remainingSlots == null` means *unlimited*, not zero (3 of 4 plans) | TRD §2.3 — absence of a counter, structurally |
+| 4 | `PaymentFailedException` is unchecked — easy to leak a `500` over partial state | TRD §3.6 table + §4.2 escape-path audit |
+| 5 | Charge-vs-decrement ordering with no transaction | TRD §1.4.2 — reserve → charge → commit |
+| 6 | Q-1 put a clock back in | TRD §1.6 — one `Clock`, in `StartDatePolicy` only |
+| 7 | Q-3 extends the payment port | TRD §1.7 — two nested subtypes, umbrella preserved |
+| 8 | Cleanup parity across two payment failure modes | TRD §4.9 — one `catch (RuntimeException)`, parameterised T-2/T-10 |
+| 9 | **Jackson 3 split packages** — databind at `tools.jackson.*`, annotations still `com.fasterxml.*` | TRD §3 preamble, verified from the classpath |
