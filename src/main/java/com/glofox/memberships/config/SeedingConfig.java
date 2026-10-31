@@ -23,9 +23,14 @@ import org.springframework.context.annotation.Configuration;
  * <p>The adapters themselves carry no Spring annotations. They are plain classes
  * this configuration constructs, which is why they unit-test with no
  * application context.
+ *
+ * <p>Public only so that slice tests can {@code @Import} it and exercise the
+ * real seeded stores instead of mocks. {@code @Import} resolves a class literal
+ * at compile time, so a package-private configuration is unreachable from a
+ * test in another package.
  */
 @Configuration
-class SeedingConfig {
+public class SeedingConfig {
 
     @Bean
     PlanCatalogue planCatalogue() {

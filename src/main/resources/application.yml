@@ -4,6 +4,13 @@ server:
 spring:
   application:
     name: memberships-task
+  jackson:
+    # Global snake_case on the wire, so no DTO needs @JsonProperty. Note that
+    # default-property-inclusion is deliberately NOT set: the contract requires
+    # credits and remaining_slots to be PRESENT with a null value, so a client
+    # can tell "unlimited" from "field missing". Adding non_null here would
+    # break that contract.
+    property-naming-strategy: SNAKE_CASE
 
 logging:
   level:
