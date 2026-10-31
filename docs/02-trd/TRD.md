@@ -442,8 +442,29 @@ record StartDatePolicy(Clock clock) {
 
 `PurchaseService` depends on `StartDatePolicy`, **not** on `Clock`. So the
 service has no clock field, the domain has no clock field, and no business rule
-has one available to read even by accident. The enforcement is that
-`grep -rn "Clock" src/main` returns two files.
+has one available to read even by accident.
+
+**Amended by F-6 (step 05).** This section originally said "exactly one class
+holds a `Clock`", which FR-6 makes impossible: every `Purchase` carries a
+`createdAt`, so something in the service layer needs the time. There are
+therefore **two** holders —
+
+| Class | Exposes | Holds `Clock` |
+|---|---|---|
+| `StartDatePolicy` | `void requireNotPast(LocalDate)` | yes |
+| `PurchaseFactory` | `Purchase create(…)` — stamps `createdAt` | yes |
+| `PurchaseService` | the rules | **no** |
+
+— and the invariant is stated correctly as: **no class exposes the current
+time.** Neither collaborator has a `now()` or `today()` accessor, so
+`PurchaseService` holds both and still cannot ask what time it is. A future
+expiry rule has no means to acquire a time dependency, which was this section's
+actual purpose; "one class" was only ever a proxy for it.
+
+Enforcement is three greps (step 05 verification #4): `java.time.Clock` appears
+in exactly `ClockConfig`, `StartDatePolicy` and `PurchaseFactory`; no
+`Instant.now()` or `LocalDate.now()` without an argument appears anywhere; and
+`PurchaseService` has no `Clock` field.
 
 **Why a collaborator rather than a `Clock` field on the service.** A `Clock` on
 `PurchaseService` would be *reachable* from every rule in it. The rule "validation

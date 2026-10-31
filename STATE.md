@@ -5,10 +5,10 @@ Update it in the same turn that an artifact is approved and persisted.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 05
-LAST APPROVED: step_04 (payment port extension + CountingGateway)
-NEXT STEP: Review step_05_purchase_service.md AND decide findings F-6 and
-           F-7, which amend approved documents. Then step_06.
+CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 06
+LAST APPROVED: step_05 (PurchaseService); findings F-6 and F-7 applied
+NEXT STEP: Review step_06_purchase_endpoints_and_errors.md. On approval ->
+           step_07_concurrency_harness.md, the headline step.
 ==================================================
 ```
 
@@ -37,7 +37,9 @@ NEXT STEP: Review step_05_purchase_service.md AND decide findings F-6 and
 | 2026-10-31 | 3 | `step_02_memory_stores_and_seeding.md` | **Approved** |
 | 2026-10-31 | 3 | `step_03_plans_endpoint.md` | **Approved** |
 | 2026-10-31 | 3 | `step_04_payment_port_extension.md` | **Approved** |
-| 2026-10-31 | 3 | `step_05_purchase_service.md` | Draft — awaiting review |
+| 2026-10-31 | 3 | `step_05_purchase_service.md` | **Approved** |
+| 2026-10-31 | 3 | F-6 + F-7 amendments to TRD §1.6, PRD AC-8/T-2/T-10, step_02 | **Approved** |
+| 2026-10-31 | 3 | `step_06_purchase_endpoints_and_errors.md` | Draft — awaiting review |
 
 ### Deviations from the TRD, to record in SUBMISSION.md (step 08)
 
@@ -65,8 +67,8 @@ NEXT STEP: Review step_05_purchase_service.md AND decide findings F-6 and
 | F-3 | §2.5 — `PurchaseStore.compareAndSetStatus` | Tier 2 | ✅ Applied |
 | F-4 | PRD AC-10 → D-10, T-12 — `purchase_already_cancelled` | Tier 2 | ✅ Applied |
 | F-5 | PRD T-1 — fourth assertion on gateway charge count | **Tier 0/1** | ✅ Applied, new from TRD §5 |
-| F-6 | TRD §1.6 + step 02 verification #4 — the clock boundary never accounted for FR-6's `createdAt`; resolved with a second holder (`PurchaseFactory`) | **Tier 0/1** | ⏸ **Pending**, new from step 05 |
-| F-7 | PRD T-2/T-10 + AC-8 — nothing asserts the unlimited claim is released on payment failure. An unlimited plan has no inventory counter, so both tests pass while the member is permanently barred | **Tier 0/1** | ⏸ **Pending**, new from step 05 |
+| F-6 | TRD §1.6 + step 02 verification #4 — the clock boundary never accounted for FR-6's `createdAt`; resolved with a second holder (`PurchaseFactory`) | **Tier 0/1** | ✅ Applied |
+| F-7 | PRD T-2/T-10 + AC-8 — nothing asserts the unlimited claim is released on payment failure. An unlimited plan has no inventory counter, so both tests pass while the member is permanently barred | **Tier 0/1** | ✅ Applied |
 
 PRD carries 10 decisions and 12 tests. All F- and R- findings reached `main`
 with the TRD merge (`32ed602`).

@@ -327,6 +327,10 @@ grep -rn "org\.springframework\|jackson\|com\.glofox\.memberships\.web\|com\.glo
 # 4. The clock exists in exactly one place (TRD §1.6 is structural, so prove it)
 grep -rln "java\.time\.Clock" src/main/java | sort
 # expect exactly: .../config/ClockConfig.java
+#   NOTE (F-6): correct as of THIS step. Step 05 adds two more holders —
+#   service/StartDatePolicy.java and service/PurchaseFactory.java — because
+#   FR-6's createdAt needs the time too. The lasting invariant is not "one
+#   file" but "no class exposes the current time"; see TRD §1.6 as amended.
 
 # 5. The app boots with a populated catalogue (PRD AC-1, NFR-9)
 ./gradlew bootRun --console=plain 2>&1 | grep -E "id=.*name=" | wc -l    # expect 4

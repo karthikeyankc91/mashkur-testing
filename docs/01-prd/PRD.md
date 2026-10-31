@@ -196,9 +196,16 @@ one per success and never drops below zero. Plans with `remaining_slots: null`
 are purchasable without limit.
 
 ### AC-8 — Payment failure leaves nothing behind
-Whenever a charge does not succeed — for **either** failure mode below — no
-purchase is retrievable by any id, and `remaining_slots` for the targeted plan is
-unchanged from its pre-request value.
+Whenever a charge does not succeed — for **either** failure mode below — **all
+three** pieces of mutable state are left as they were: no purchase is
+retrievable by any id, `remaining_slots` for the targeted plan is unchanged from
+its pre-request value, and **the member's unlimited claim is released**.
+
+The third clause was added by TRD finding F-7, and the omission mattered more
+than it looks: an unlimited plan has no inventory counter at all, so a service
+that claimed the member's unlimited slot and never released it would satisfy the
+first two clauses while permanently barring that member from ever buying an
+unlimited membership again.
 
 - **AC-8a — Declined.** The card was refused: a definitive answer from a working
   gateway. Responds `402` / `payment_declined`. Not retryable as-is.
@@ -405,7 +412,7 @@ itself part of the submission.
 | # | Test | Risk it retires |
 |---|---|---|
 | **T-1** | Promo oversell: 500 virtual threads released from one start gate onto 5 slots. Asserts **four** invariants — exactly 5 × `201`; all others `409 plan_sold_out`; final `remaining_slots == 0`; **gateway charged exactly 5 times** | The headline requirement and an explicit evaluation criterion. The charge count is not redundant: an implementation that charged all 500 cards and persisted only 5 satisfies the other three (TRD F-5) |
-| **T-2** | Payment failure: no purchase persisted **and** inventory unchanged | FR-5(f); the exception is unchecked, so the default failure mode is a leaked `500` over partial state |
+| **T-2** | Payment decline: no purchase persisted, inventory unchanged, **and the member's unlimited claim released** — proven by a retry for the same member succeeding | FR-5(f); the exception is unchecked, so the default failure mode is a leaked `500` over partial state. The claim clause is F-7: without it the test passes while the member is permanently barred, because unlimited plans have no inventory counter |
 | **T-3** | Concurrent duplicate-unlimited, same member → exactly one `201` | NFR-3, the race the brief does not mention |
 | **T-4** | `remaining_slots: null` is unlimited — repeated purchases of `10-Class Pack` succeed | Highest-probability one-character bug: an inventory check written `remaining > 0` makes three of four plans unpurchasable |
 | **T-5** | Legacy Plan → `409 plan_inactive`, no charge attempted | FR-5(c) |
@@ -413,7 +420,7 @@ itself part of the submission.
 | **T-7** | Validation matrix: blank name, whitespace-only name, bad UUID, malformed date | FR-3 step 1–2 |
 | **T-8** | `GET /v1/plans` returns 4 including the inactive plan | FR-2; easy to filter inactive out by reflex |
 | **T-9** | `start_date` of yesterday → `400 start_date_in_past`; today → `201` | AC-11, with a pinned clock. The today boundary is the off-by-one |
-| **T-10** | Gateway outage → `502 payment_gateway_error`, no purchase, inventory unchanged | AC-8b. Must assert the *same* cleanup as T-2, or the new branch silently skips it |
+| **T-10** | Gateway outage → `502 payment_gateway_error`, with the **identical three-part cleanup** asserted as T-2 | AC-8b. Written as one parameterised test with T-2, so the second failure mode cannot skip a cleanup assertion the first one makes |
 | **T-11** | Cancel an unlimited, then repurchase → `201` *(Tier 2 only)* | D-9 |
 | **T-12** | Concurrent double-cancel of one promo purchase: one `200`, one `409 purchase_already_cancelled`, slot restored **exactly once** *(Tier 2 only)* | D-10 / TRD F-3 — the restore path has the same check-then-act race as the decrement, and only the counter's final value catches it |
 
