@@ -5,11 +5,10 @@ Update it in the same turn that an artifact is approved and persisted.
 
 ```
 ==================================================
-CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 01
-LAST APPROVED: TRD as a whole -- merged to main (32ed602)
-NEXT STEP: Review docs/03-implementation/00_INDEX.md (the 8-step
-           decomposition) and step_01_domain_and_ports.md. Steps are
-           written one at a time; 02-08 are titles only until reached.
+CURRENT PHASE: Phase 3 [Modular Implementation Plan] -> Step 02
+LAST APPROVED: 00_INDEX.md decomposition + step_01 (domain and ports)
+NEXT STEP: Review step_02_memory_stores_and_seeding.md. On approval ->
+           step_03_plans_endpoint.md. Steps 03-08 are titles only.
 ==================================================
 ```
 
@@ -34,7 +33,14 @@ NEXT STEP: Review docs/03-implementation/00_INDEX.md (the 8-step
 | 2026-10-30 | 2 | TRD §5 test strategy | **Approved** |
 | 2026-10-30 | 2 | TRD §1.7 + §1.1-1.3 + §1.5, §1.6, §1.8 | **Approved** |
 | 2026-10-30 | 2 | TRD Phase 2.3 review, 4 passes, R-1..R-6 | **Approved** — merged `32ed602` |
-| 2026-10-30 | 3 | `00_INDEX.md` 8-step decomposition + `step_01` | Draft — awaiting review |
+| 2026-10-30 | 3 | `00_INDEX.md` 8-step decomposition + `step_01` | **Approved** |
+| 2026-10-31 | 3 | `step_02_memory_stores_and_seeding.md` | Draft — awaiting review |
+
+### Deviations from the TRD, to record in SUBMISSION.md (step 08)
+
+| # | Deviation | Why | Introduced |
+|---|---|---|---|
+| DV-1 | TRD §1.8 put `toPlan`/`parseType` as **private** methods on `SeedingConfig`; step 02 moves them to a package-private `PlanSeedMapper` | Private methods on a `@Configuration` class cannot be unit tested, and §2.6's fail-fast-on-unknown-type requirement cannot be exercised through `SeedData`, which is immutable vendor code | step 02 |
 
 ### Phase 2.3 review findings
 
