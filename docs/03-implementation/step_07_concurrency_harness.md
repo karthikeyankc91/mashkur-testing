@@ -341,7 +341,7 @@ counter.set(current - 1);     // lost update
 
 | Target | Killed |
 |---|---|
-| `promoPackSellsExactlyFiveTimesUnder500Contenders` alone | **2 of 8 runs (25%)** |
+| `promoPackSellsExactlyFiveTimesUnder500Contenders` alone | **3 of 16 runs (~19%)** — measured as 2/8 and 1/8 in two separate samples |
 | the full concurrency suite | **5 of 5 runs (100%)** |
 
 **The headline oversell test is far weaker than it looks.** Only 5 of 500
@@ -350,15 +350,25 @@ attempts can ever win, so there are roughly five trips through the
 
 `failedChargesUnderLoadLeakNoInventory` is what actually has teeth. Every charge
 fails and returns its slot, so the five slots recycle ~490 times in one run:
-about a hundredfold more chances to lose an update. Under the mutant the counter
-finished at **11** — *above* its seeded maximum of 5, because lost updates let
-releases outnumber reservations.
+about a hundredfold more chances to lose an update. Under the mutant the counter finished
+at **6, 9, 10, 11, 12 and 20** across runs — all *above* its seeded maximum of
+5, because lost updates let releases outnumber reservations.
 
 **This retrospectively justifies a decision that looked like laziness.**
 `release()` deliberately does not clamp at the seeded maximum (step 02 §4.2). A
-clamp would have pinned that 11 back to 5 and **hidden the broken CAS
-completely** — the safety net would have destroyed the only evidence. The
+clamp would have pinned every one of those values back to 5 and **inverted the
+result** — the mutant would have survived 5 of 5 instead of dying 5 of 5. The
 counter's ability to hold an impossible value is what made the bug visible.
+
+### Mutant C — cancel restores before the compare-and-set (added in step 09)
+
+| Target | Killed |
+|---|---|
+| the cancel suite | **5 of 5 runs (100%)** |
+
+`concurrentCancelsRestoreExactlyOneSlot` and its unlimited companion report
+**2, 3, 4 and 6** callers each "successfully" cancelling the same purchase.
+Deterministic enough to be a regression guard rather than a sampling exercise.
 
 ### Mutant B — `containsKey` then `put` in `InMemoryUnlimitedClaimStore`
 
@@ -367,17 +377,31 @@ if (claims.containsKey(key)) return false;
 claims.put(key, purchaseId);
 ```
 
-Killed immediately by `sameMemberWinsExactlyOneUnlimitedMembership`: two
-memberships for Alice where one is allowed. This mutant dies far more readily
-than Mutant A because all 500 attempts contend on the *same* key, so every
-thread passes through the race window rather than only the winners.
+| Target | Killed |
+|---|---|
+| the full concurrency suite | **9 of 12 runs (75%)** |
+
+Killed by `sameMemberWinsExactlyOneUnlimitedMembership` and its case/whitespace
+companion, granting **2 or 3** memberships where one is allowed.
+
+**Correction to an earlier draft of this section**, which said this mutant
+"dies immediately" and far more readily than Mutant A. That was one observation,
+and a larger sample disagrees: a first 5-run sample killed it only **1 of 5**,
+and the 12-run sample settled at 75%. It is more detectable than Mutant A's
+*targeted* test (~19%) because all 500 attempts contend on the same key rather
+than only 5 winning, but it is **less** reliable than the suite's 100% against
+Mutant A — so **this is now the weakest detection in the suite.** The cheap
+hardening is `@RepeatedTest(10)` on that one test, which drives 75% per run to
+effectively certain.
 
 ### What this means for the submission
 
 The honest claim is not "my concurrency tests pass". It is:
 
 - the oversell test passes **and** a deliberately broken CAS is caught, though
-  only by the failure-path test with reliability I measured rather than guessed;
+  only by the failure-path test, with reliability I measured rather than guessed
+  — and two of the three mutants are caught 100% of the time while the third is
+  caught 75% of the time;
 - a passing concurrency test remains weak evidence — it shows no breaking
   interleaving was *hit*, not that none exists;
 - if this had to be stronger, the next step is not more assertions but a

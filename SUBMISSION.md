@@ -121,20 +121,30 @@ Both are implemented and tested, after core was complete and merged.
 8. Error contract, all thirteen rows, including that a membership conflict does
    not echo the member name.
 
-**I checked the concurrency tests can actually fail.** Replacing the CAS in
-`tryReserve` with a read-then-write: the headline oversell test caught it in
-only **2 of 8 runs**, while the full suite caught it in **5 of 5** — the
-failure-path test recycles the 5 slots ~490 times per run, giving roughly a
-hundredfold more chances to lose an update. Under that mutant the counter
-finished at **11**, above its seeded maximum.
+**I checked the concurrency tests can actually fail, and measured how
+reliably.** Three mutants, each run repeatedly:
 
-That result justified a decision that had looked like laziness: `release()`
-deliberately does not clamp at the seeded maximum. A clamp would have pinned 11
-back to 5 and hidden the broken CAS entirely. Replacing `putIfAbsent` with
-`containsKey`-then-`put` died immediately — two memberships for one member.
+| Broken on purpose | Symptom | Caught |
+|---|---|---|
+| inventory CAS → read-then-write | oversells; counter inflates to 6–20 | **3/16** by the oversell test alone; **5/5** by the full suite |
+| `putIfAbsent` → `containsKey`+`put` | 2–3 unlimited memberships per member | **9/12** |
+| cancel restores before the CAS | 2–6 callers cancel the same purchase | **5/5** |
+
+The first row is the interesting one. **My headline oversell test is far weaker
+than it looks** — only ~19% of runs catch the bug it was written for, because
+only 5 of 500 attempts ever reach the race window. The failure-path test is what
+has teeth: every charge fails and returns its slot, so the 5 slots recycle ~490
+times per run, roughly a hundredfold more chances to lose an update.
+
+That justified a decision that had looked like laziness: `release()` deliberately
+does not clamp at the seeded maximum. A clamp would have pinned all those
+inflated counters back to 5 and **inverted the result** — the mutant would have
+survived every run instead of dying every run.
 
 A passing concurrency test is still weak evidence: it shows no breaking
-interleaving was *hit*, not that none exists.
+interleaving was *hit*, not that none exists. The weakest link is now the
+one-unlimited race at 75% per run; `@RepeatedTest` would close that, and a
+deterministic interleaving tool (jcstress, Lincheck) is the real answer.
 
 ## Known gaps / what I would do next
 
